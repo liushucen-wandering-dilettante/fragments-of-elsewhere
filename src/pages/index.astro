@@ -1,11 +1,100 @@
 ---
-import Welcome from '../components/Welcome.astro';
-import Layout from '../layouts/Layout.astro';
-
-// Welcome to Astro! Wondering what to do next? Check out the Astro documentation at https://docs.astro.build
-// Don't want to use any of this? Delete everything in this file, the `assets`, `components`, and `layouts` directories, and start fresh.
+const title = "fragments of elsewhere";
 ---
 
-<Layout>
-	<Welcome />
-</Layout>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{title}</title>
+  </head>
+
+  <body>
+    <main>
+      <p class="label">A MEDIA SYSTEM OF DISPLACED MEMORY</p>
+
+      <h1>fragments<br />of elsewhere</h1>
+
+      <p class="introduction">
+        An atlas of images, sounds, recordings and texts,
+        connected through memory and displacement.
+      </p>
+
+      <nav>
+        <a href="/atlas">Enter the atlas →</a>
+        <a href="/fragments/F001">Begin with F001 →</a>
+      </nav>
+    </main>
+  </body>
+</html>
+
+<style>
+  :global(*) {
+    box-sizing: border-box;
+  }
+
+  :global(body) {
+    margin: 0;
+    background: #ece9df;
+    color: #1d1d1b;
+    font-family: Arial, sans-serif;
+  }
+
+  main {
+    min-height: 100vh;
+    padding: 48px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .label {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+  }
+
+  h1 {
+    margin: auto 0 32px;
+    font-family: Georgia, serif;
+    font-size: clamp(64px, 12vw, 180px);
+    font-weight: normal;
+    line-height: 0.82;
+    letter-spacing: -0.06em;
+  }
+
+  .introduction {
+    max-width: 480px;
+    font-size: 17px;
+    line-height: 1.5;
+  }
+
+  nav {
+    display: flex;
+    gap: 28px;
+    margin-top: 40px;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px solid;
+    padding-bottom: 4px;
+  }
+
+  a:hover {
+    opacity: 0.5;
+  }
+
+  @media (max-width: 600px) {
+    main {
+      padding: 24px;
+    }
+
+    nav {
+      flex-direction: column;
+      gap: 16px;
+    }
+  }
+</style>
