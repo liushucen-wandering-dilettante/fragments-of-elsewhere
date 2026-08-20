@@ -1,0 +1,33 @@
+---
+export function getStaticPaths() {
+  return [
+    {
+      params: { slug: "train" },
+      props: { title: "Train" }
+    },
+    {
+      params: { slug: "water-reflection" },
+      props: { title: "Water / Reflection" }
+    }
+  ];
+}
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{title} — Fragments of Elsewhere</title>
+  </head>
+
+  <body>
+    <main>
+      <a href="/atlas">← Return to atlas</a>
+      <h1>{title}</h1>
+      <p>Constellation prototype</p>
+    </main>
+  </body>
+</html>

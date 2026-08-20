@@ -1,0 +1,35 @@
+---
+export function getStaticPaths() {
+  return [
+    {
+      params: { id: "F001" },
+      props: { id: "F001" }
+    }
+  ];
+}
+
+const { id } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{id} — Fragments of Elsewhere</title>
+  </head>
+
+  <body>
+    <main>
+      <a href="/atlas">← Return to atlas</a>
+      <h1>{id}</h1>
+
+      <nav>
+        <a href="/constellations/train">Continue through train</a>
+        <a href="/constellations/water-reflection">
+          Continue through water
+        </a>
+      </nav>
+    </main>
+  </body>
+</html>
