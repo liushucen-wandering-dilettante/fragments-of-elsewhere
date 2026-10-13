@@ -1,0 +1,215 @@
+@font-face {
+  font-family: "PT Sans";
+  src: url("/fonts/pt-sans-regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "PT Sans";
+  src: url("/fonts/pt-sans-bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+/* Enlarge Latin glyphs once, without enlarging Chinese or compounding
+   inherited font sizes in nested elements. Group names use original PT Sans. */
+@font-face {
+  font-family: "PT Sans Enlarged";
+  src: url("/fonts/pt-sans-regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  size-adjust: 110%;
+}
+
+@font-face {
+  font-family: "PT Sans Enlarged";
+  src: url("/fonts/pt-sans-bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  size-adjust: 110%;
+}
+
+@font-face {
+  font-family: "HY QiHei X3 Web";
+  src: url("/fonts/HYQiHeiX3-35W-1.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3 Web";
+  src: url("/fonts/HYQiHeiX3-45W-2.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 200;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3 Web";
+  src: url("/fonts/HYQiHeiX3-55W-3.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3 Web";
+  src: url("/fonts/HYQiHeiX3-65W-4.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3 Web";
+  src: url("/fonts/HYQiHeiX3-75W-5.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3 Web";
+  src: url("/fonts/HYQiHeiX3-85W-6.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3 Web";
+  src: url("/fonts/HYQiHeiX3-95W-7.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+/* Compatibility for text components using the earlier family name. */
+@font-face {
+  font-family: "HY QiHei X3";
+  src: url("/fonts/HYQiHeiX3-35W-1.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3";
+  src: url("/fonts/HYQiHeiX3-45W-2.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 200;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3";
+  src: url("/fonts/HYQiHeiX3-55W-3.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3";
+  src: url("/fonts/HYQiHeiX3-65W-4.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3";
+  src: url("/fonts/HYQiHeiX3-75W-5.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3";
+  src: url("/fonts/HYQiHeiX3-85W-6.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+@font-face {
+  font-family: "HY QiHei X3";
+  src: url("/fonts/HYQiHeiX3-95W-7.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF,
+    U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF,
+    U+20000-3134F;
+}
+
+/* Latin letters use enlarged PT Sans. Chinese characters and full-width punctuation
+   use the uploaded HY QiHei X3 files. A unique Chinese alias avoids conflicts
+   with older component-local @font-face declarations. */
+html,
+body,
+body * {
+  font-family:
+    "PT Sans Enlarged", "HY QiHei X3 Web", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif !important;
+}
+
+/* Add this attribute to the existing main group title below the minimap.
+   The group atlas publishes the current screen-space label size here. */
+body [data-foe-group-title],
+body [data-foe-group-title] * {
+  font-family:
+    "PT Sans", "HY QiHei X3 Web", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif !important;
+  font-size: var(--foe-group-label-size, 16px) !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  letter-spacing: normal !important;
+  line-height: 1.2;
+}

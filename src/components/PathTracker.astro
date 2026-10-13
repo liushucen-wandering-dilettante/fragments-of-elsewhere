@@ -1,0 +1,217 @@
+---
+interface FragmentData {
+  id: string;
+  type:
+  | "image"
+  | "text"
+  | "audio"
+  | "video";
+  image?: string;
+  alt?: string;
+  title?: string;
+  poster?: string;
+}
+
+interface Props {
+  fragment: FragmentData;
+}
+
+const { fragment } = Astro.props as Props;
+
+const pathItem = {
+  id: fragment.id,
+  type: fragment.type,
+  image:
+  fragment.image ??
+  fragment.poster ??
+  null,
+  alt: fragment.alt ?? "",
+  title: fragment.title ?? fragment.id
+};
+---
+
+<div
+  data-current-path-fragment
+  data-fragment={JSON.stringify(pathItem)}
+  hidden
+></div>
+
+<script is:inline>
+  (() => {
+    const PATH_KEY =
+      "fragments-of-elsewhere:path";
+
+    const PENDING_KEY =
+      "fragments-of-elsewhere:pending-keyword";
+
+    function normalizePath(path) {
+      return path.endsWith("/")
+        ? path
+        : `${path}/`;
+    }
+
+    function readPath() {
+      try {
+        const saved =
+          window.localStorage.getItem(
+            PATH_KEY
+          );
+
+        if (!saved) return [];
+
+        const parsed = JSON.parse(saved);
+
+        return Array.isArray(parsed)
+          ? parsed
+          : [];
+      } catch (error) {
+        console.error(
+          "Could not read path:",
+          error
+        );
+
+        return [];
+      }
+    }
+
+    const marker =
+      document.querySelector(
+        "[data-current-path-fragment]"
+      );
+
+    if (marker) {
+      try {
+        const fragment = JSON.parse(
+          marker.dataset.fragment || "{}"
+        );
+
+        const currentPath =
+          normalizePath(
+            window.location.pathname
+          );
+
+        const path = readPath();
+
+        const item = {
+          id: fragment.id,
+          type: fragment.type,
+          href: currentPath,
+          image: fragment.image || null,
+          alt: fragment.alt || "",
+          keyword:
+            fragment.title ||
+            fragment.id
+        };
+
+        const pendingData =
+          window.localStorage.getItem(
+            PENDING_KEY
+          );
+
+        if (pendingData) {
+          try {
+            const pending =
+              JSON.parse(pendingData);
+
+            if (
+              fragment.type === "text" &&
+              pending.target === currentPath &&
+              pending.keyword
+            ) {
+              item.keyword =
+                pending.keyword;
+            }
+          } catch (error) {
+            console.error(
+              "Could not read keyword:",
+              error
+            );
+          }
+
+          window.localStorage.removeItem(
+            PENDING_KEY
+          );
+        }
+
+        const previous =
+          path[path.length - 1];
+
+        // 刷新同一页时不重复记录
+        if (
+          previous?.href !== item.href
+        ) {
+          path.push(item);
+
+          window.localStorage.setItem(
+            PATH_KEY,
+            JSON.stringify(
+              path.slice(-200)
+            )
+          );
+        }
+      } catch (error) {
+        console.error(
+          "Could not record fragment:",
+          error
+        );
+      }
+    }
+
+    // 记录用户点击的关键词
+
+    document.addEventListener(
+      "click",
+      (event) => {
+        const clickedElement =
+          event.target;
+
+        if (
+          !(
+            clickedElement instanceof
+            Element
+          )
+        ) {
+          return;
+        }
+
+        const link =
+          clickedElement.closest(
+            'a[href*="/fragments/"]'
+          );
+
+        if (!link) return;
+
+        const visibleLanguageLabel =
+          link.querySelector(
+            "[data-follow-language]:not([hidden])"
+          );
+
+        const keyword =
+          link.dataset.pathLabel?.trim() ||
+          visibleLanguageLabel
+            ?.textContent?.trim() ||
+          link.textContent?.trim() ||
+          "";
+
+        if (!keyword) return;
+
+        const targetPath =
+          normalizePath(
+            new URL(
+              link.href,
+              window.location.origin
+            ).pathname
+          );
+
+        window.localStorage.setItem(
+          PENDING_KEY,
+          JSON.stringify({
+            keyword,
+            target: targetPath
+          })
+        );
+      },
+      true
+    );
+  })();
+</script>

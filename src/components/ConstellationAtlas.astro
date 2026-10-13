@@ -1,0 +1,2074 @@
+---
+import fragmentsSource from "../data/fragments.json";
+import DirectionalButtons from "./DirectionalButtons.astro";
+import "../styles/fonts.css";
+
+type FragmentItem = {
+  id: string;
+  type: "image" | "video" | "audio" | "text";
+  image?: string;
+  poster?: string;
+  alt?: string;
+  description?: string;
+  title?: string;
+  titleEn?: string;
+  excerpt?: string;
+  excerptEn?: string;
+  constellations?: string[];
+  follow?: Array<{
+    label?: string;
+    target: string;
+  }>;
+};
+
+interface Props {
+  mode?: "full" | "mini" | "group";
+  groupName?: string;
+  focusId?: string;
+  interactiveMini?: boolean;
+  miniAtlasPath?: string;
+}
+
+const {
+  mode = "full", focusId = "", groupName = "",
+  interactiveMini = false, miniAtlasPath = "/",
+} = Astro.props as Props;
+
+const fragments = fragmentsSource as FragmentItem[];
+
+const atlasData = fragments
+  .filter((fragment) => fragment.constellations?.length)
+  .map((fragment) => ({
+    id: fragment.id,
+    type: fragment.type,
+    // Small WebP files keep panning and zooming responsive.
+    thumbnail:
+      fragment.type === "image" || fragment.type === "video"
+        ? `/thumbnails-proportional/${fragment.id}.webp`
+        : fragment.poster,
+    originalImage: fragment.type === "image" ? fragment.image : fragment.poster,
+    label:
+      fragment.alt ||
+      fragment.description ||
+      fragment.title ||
+      "Untitled fragment",
+    alt: fragment.alt || "",
+    title: fragment.title || "",
+    titleEn: fragment.titleEn || "",
+    description: fragment.description || "",
+    excerpt: fragment.excerptEn || fragment.excerpt || "",
+    constellations: fragment.constellations,
+    follow: fragment.follow || [],
+  }));
+
+const serializedAtlasData = JSON.stringify(atlasData).replace(/</g, "\\u003c");
+---
+
+<DirectionalButtons />
+
+<div
+  class:list={["constellation-atlas", { "is-mini": mode === "mini" }]}
+  data-constellation-atlas
+  data-atlas-mode={mode}
+  data-focus-id={focusId}
+  data-group-name={groupName}
+  data-mini-group-links={interactiveMini ? "true" : undefined}
+  data-mini-atlas-path={interactiveMini ? miniAtlasPath : undefined}
+>
+  <canvas
+    class="atlas-canvas"
+    aria-label={mode === "mini"
+      ? groupName
+        ? `Position of ${groupName} in the complete atlas.`
+        : "Overview of the complete atlas. The current fragment is marked by a ring in its constellation colours."
+      : "An atlas of fragments arranged in overlapping constellations. Drag to move and scroll or pinch to zoom."}
+  ></canvas>
+
+  {
+    mode !== "mini" && (
+      <div class="atlas-zoom-controls" role="group" aria-label="Atlas zoom controls">
+        <button type="button" data-zoom-in aria-label="Zoom in">+</button>
+        <button type="button" data-zoom-out aria-label="Zoom out">-</button>
+      </div>
+    )
+  }
+
+  <script
+    is:inline
+    type="application/json"
+    data-atlas-data
+    set:html={serializedAtlasData}
+  ></script>
+</div>
+
+<script>
+  // @ts-nocheck
+  import * as d3 from "d3";
+  import constellationColors from "../data/constellation-colors.json";
+
+  const WORLD_WIDTH = 2800;
+  const WORLD_HEIGHT = 2200;
+  const IMAGE_SIZE = 46;
+  const GROUP_IMAGE_SIZE = 126;
+  const BRIDGE_SIZE = IMAGE_SIZE;
+  const RADIAL_X = 1000;
+  const RADIAL_Y = 800;
+  const OVERVIEW_PADDING = 56;
+  const MINI_NEUTRAL_COLOR = "#a6a6a6";
+  const UI_FONT =
+    '"PT Sans", "HY QiHei X3 Web", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
+  const CONTENT_FONT =
+    '"PT Sans Enlarged", "HY QiHei X3 Web", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
+
+  // Each press of the + button moves almost exactly one stage forward.
+  const ZOOM_STAGES = {
+    groups: 1.35,
+    visualLabels: 2.05,
+    mediaDetails: 3,
+    relationships: 4.3,
+  };
+
+  // Clockwise order places frequently overlapping constellations next to
+  // one another. Every group has equal status; no central or primary group.
+  const preferredGroupOrder = [
+    "water", "organic", "obscured vision", "transit", "window", "room",
+    "air", "plastic", "residue", "ritual", "labour", "street",
+  ];
+
+  // Hashing IDs keeps positions stable when the JSON array is reordered.
+  const hashFor = (value) => {
+    let hash = 2166136261;
+    for (const character of value) {
+      hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+    }
+    return hash >>> 0;
+  };
+
+  const palette = constellationColors;
+
+  const navigateWithFade = (href) => {
+    if (typeof window.elsewhereNavigate === "function") {
+      window.elsewhereNavigate(href);
+    } else {
+      window.location.assign(href);
+    }
+  };
+
+  const shortened = (value = "", maximum = 36) =>
+    value.length > maximum ? `${value.slice(0, maximum - 1)}…` : value;
+
+  const baseLayoutCache = new Map();
+  const LAYOUT_STORAGE_KEY = "fragments-of-elsewhere:atlas-layout:v1";
+
+  // A closed centripetal spline passes through the padded hull vertices.
+  // Drawing and hit testing share the same Path2D, including rounded corners.
+  const miniContourLine = d3.line().curve(d3.curveCatmullRomClosed.alpha(0.5));
+  const miniContourPath = (hull) => hull && typeof Path2D === "function"
+    ? new Path2D(miniContourLine(hull)) : null;
+  const MINI_FILL_IDLE = 0.012;
+  const MINI_FILL_HOVER = 0.11;
+  const MINI_OUTLINE_IDLE = 0.35;
+  const MINI_OUTLINE_HOVER = 0.9;
+
+  // A padded hull works for ordinary groups and for one/two-member groups.
+  // It uses the same fixed positions as the home atlas, never a second layout.
+  const buildMiniGroupRegions = (nodes, names, scale) => {
+    const padding = Math.max(IMAGE_SIZE / 2, 3 / Math.max(scale, 0.0001));
+    return names.map((name) => {
+      const members = nodes.filter((node) => node.constellations.includes(name));
+      const points = members.flatMap((node) =>
+        Array.from({ length: 12 }, (_, index) => {
+          const angle = index * Math.PI / 6;
+          return [node.baseX + Math.cos(angle) * padding,
+            node.baseY + Math.sin(angle) * padding];
+        }));
+      const hull = d3.polygonHull(points);
+      return { name, members, hull, path: miniContourPath(hull),
+        area: hull ? Math.abs(d3.polygonArea(hull)) : Infinity };
+    }).filter((region) => region.hull)
+      .sort((a, b) => a.area - b.area || a.name.localeCompare(b.name));
+  };
+
+  const miniRegionsAtPoint = (regions, point, hitContext) =>
+    regions.filter((region) => region.path && hitContext
+      ? hitContext.isPointInPath(region.path, point[0], point[1])
+      : d3.polygonContains(region.hull, point));
+
+  function initialiseAtlases() {
+    document
+    .querySelectorAll("[data-constellation-atlas]:not([data-atlas-ready])")
+    .forEach((root) => {
+      const isMini = root.dataset.atlasMode === "mini";
+      const isGroup = root.dataset.atlasMode === "group";
+      const interactiveMini = isMini && root.dataset.miniGroupLinks === "true";
+      const miniAtlasPath = root.dataset.miniAtlasPath || "/";
+      const currentGroup = root.dataset.groupName || "";
+      const mediaScale = isGroup ? GROUP_IMAGE_SIZE / IMAGE_SIZE : 1;
+      let groupGrid = null;
+      const requestedFocusId =
+        root.dataset.focusId ||
+        new URLSearchParams(window.location.search).get("fragment") ||
+        "";
+
+      const canvas = root.querySelector(".atlas-canvas");
+      const dataElement = root.querySelector("[data-atlas-data]");
+      if (!canvas || !dataElement) return;
+
+      let context = canvas.getContext("2d", { alpha: false });
+      if (!context) return;
+
+      const allFragments = JSON.parse(dataElement.textContent || "[]");
+      const nodes = allFragments
+        .filter((fragment) => !isGroup || fragment.constellations?.includes(currentGroup))
+        .map((fragment) => ({
+          ...fragment,
+          constellations: [...new Set(fragment.constellations || [])].sort(),
+          shortLabel: shortened(fragment.label),
+          imageElement: null,
+        }))
+        .filter((fragment) => fragment.constellations.length)
+        .sort((a, b) => a.id.localeCompare(b.id, "en"));
+      if (!nodes.length) return;
+
+      const presentGroups = new Set(allFragments.flatMap((node) => node.constellations || []));
+      const groupNames = [
+        ...preferredGroupOrder.filter((name) => presentGroups.has(name)),
+        ...[...presentGroups]
+          .filter((name) => !preferredGroupOrder.includes(name)).sort(),
+      ];
+      // The order comes from the entire archive, even in a local group view.
+      // Removing unrelated labels must not rotate the remaining directions.
+      const visibleGroupNames = isGroup
+        ? groupNames.filter((name) => name !== currentGroup &&
+            nodes.some((node) => node.constellations.includes(name)))
+        : groupNames;
+      const center = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 };
+      const anchors = new Map(groupNames.map((name, index) => {
+        const angle = -Math.PI * 0.88 + index * Math.PI * 2 / groupNames.length;
+        return [name, {
+          x: center.x + Math.cos(angle) * RADIAL_X,
+          y: center.y + Math.sin(angle) * RADIAL_Y,
+          angle,
+        }];
+      }));
+      const groupLabelBasePositions = new Map();
+      const groupColors = new Map(
+        groupNames.map((name) => [name, palette[name] || "#858585"]),
+      );
+      const groupMotion = new Map(
+        groupNames.map((name, index) => [
+          name,
+          {
+            x: 0,
+            y: 0,
+            phase: index * 1.61803398875,
+          },
+        ]),
+      );
+      const nodeById = new Map(nodes.map((node) => [node.id, node]));
+      const focusedNode = requestedFocusId
+        ? nodeById.get(requestedFocusId) || null
+        : null;
+      const links = nodes.flatMap((source) =>
+        (source.follow || [])
+          .map((relation) => {
+            const target = nodeById.get(relation.target);
+            return target ? { source, target, label: relation.label || "" } : null;
+          })
+          .filter(Boolean),
+      );
+
+      // All memberships contribute equally, including in colour and motion.
+      nodes.forEach((node) => {
+        node.isBridge = node.constellations.length > 1;
+        const colors = node.constellations.map((name) =>
+          d3.rgb(groupColors.get(name) || "#858585"));
+        node.color = isGroup ? groupColors.get(currentGroup) || MINI_NEUTRAL_COLOR : d3.rgb(
+          d3.mean(colors, (color) => color.r),
+          d3.mean(colors, (color) => color.g),
+          d3.mean(colors, (color) => color.b),
+        ).formatHex();
+        node.membershipKey = node.constellations.join("|");
+      });
+
+      // Cohorts share an exact membership combination, never a selected
+      // main group. Linked members are placed next to one another in a fan.
+      const neighbours = new Map(nodes.map((node) => [node.id, new Set()]));
+      links.forEach(({ source, target }) => {
+        neighbours.get(source.id).add(target.id);
+        neighbours.get(target.id).add(source.id);
+      });
+      const cohorts = d3.group(nodes, (node) => node.membershipKey);
+      cohorts.forEach((cohort) => {
+        const inCohort = new Map(cohort.map((node) => [node.id, node]));
+        const visited = new Set();
+        const ordered = [];
+        const candidates = [...cohort].sort((a, b) => {
+          const degree = (node) => [...neighbours.get(node.id)]
+            .filter((id) => inCohort.has(id)).length;
+          return degree(b) - degree(a) || a.id.localeCompare(b.id, "en");
+        });
+        candidates.forEach((start) => {
+          if (visited.has(start.id)) return;
+          const queue = [start];
+          visited.add(start.id);
+          for (let cursor = 0; cursor < queue.length; cursor += 1) {
+            const current = queue[cursor];
+            ordered.push(current);
+            [...neighbours.get(current.id)].sort().forEach((id) => {
+              if (!inCohort.has(id) || visited.has(id)) return;
+              visited.add(id);
+              queue.push(inCohort.get(id));
+            });
+          }
+        });
+
+        const memberships = cohort[0].constellations.map((name) => anchors.get(name));
+        const meanX = d3.mean(memberships, (anchor) => anchor.x) - center.x;
+        const meanY = d3.mean(memberships, (anchor) => anchor.y) - center.y;
+        // Opposite memberships can cancel out. Use the combination itself
+        // to choose a stable direction, without privileging any one member.
+        const angle = Math.hypot(meanX, meanY) > 1
+          ? Math.atan2(meanY, meanX)
+          : hashFor(cohort[0].membershipKey) / 4294967296 * Math.PI * 2;
+        const radial = { x: Math.cos(angle), y: Math.sin(angle) };
+        const tangent = { x: -radial.y, y: radial.x };
+        const shared = cohort[0].isBridge;
+        const lanes = Math.min(3,
+          Math.max(1, Math.ceil(Math.sqrt(cohort.length) * 0.65)));
+        const rowCount = Math.ceil(cohort.length / lanes);
+        ordered.forEach((node, index) => {
+          const row = Math.floor(index / lanes);
+          const laneCount = Math.min(lanes, cohort.length - row * lanes);
+          const lane = index % lanes - (laneCount - 1) / 2;
+          const jitterX = (hashFor(node.id + ":x") / 4294967296 - 0.5) * 15;
+          const jitterY = (hashFor(node.id + ":y") / 4294967296 - 0.5) * 15;
+          const radialOffset = shared ? (row - (rowCount - 1) / 2) * 66 : row * 66;
+          // Shared cohorts sit inward from the equally weighted centroid;
+          // single memberships extend outward along their group's spoke.
+          const centroidScale = shared ? 0.9 : 1;
+          node.targetX = center.x + meanX * centroidScale +
+            radial.x * radialOffset + tangent.x * lane * 62 + jitterX;
+          node.targetY = center.y + meanY * centroidScale +
+            radial.y * radialOffset + tangent.y * lane * 62 + jitterY;
+          node.x = node.targetX;
+          node.y = node.targetY;
+        });
+      });
+
+      if (isGroup) {
+        // Shuffle the reading order on entry, while keeping media in aligned
+        // rows with the same cell size for easy comparison.
+        const seedValues = new Uint32Array(1);
+        if (window.crypto?.getRandomValues) window.crypto.getRandomValues(seedValues);
+        else seedValues[0] = Math.floor(Math.random() * 4294967296);
+        const gridRandom = d3.randomLcg(seedValues[0] / 4294967296);
+        const ordered = d3.shuffler(gridRandom)([...nodes]);
+        const columns = Math.max(1, Math.ceil(Math.sqrt(nodes.length * 1.55)));
+        const rows = Math.ceil(nodes.length / columns);
+        const pitch = GROUP_IMAGE_SIZE * 1.35;
+        groupGrid = {
+          columns, rows, pitch,
+          halfWidth: ((columns - 1) * pitch + GROUP_IMAGE_SIZE) / 2,
+          halfHeight: ((rows - 1) * pitch + GROUP_IMAGE_SIZE) / 2,
+        };
+        ordered.forEach((node, index) => {
+          const row = Math.floor(index / columns);
+          const countInRow = Math.min(columns, nodes.length - row * columns);
+          const column = index % columns;
+          node.targetX = center.x + (column - (countInRow - 1) / 2) * pitch;
+          node.targetY = center.y + (row - (rows - 1) / 2) * pitch;
+          node.x = node.targetX;
+          node.y = node.targetY;
+        });
+      }
+
+      // A follow relationship is a real spring in the layout. Long cross-group
+      // links pull gently so the radial geography remains readable.
+      const springPairs = new Map();
+      links.forEach(({ source, target }) => {
+        if (source === target) return;
+        const key = [source.id, target.id].sort().join("|");
+        if (springPairs.has(key)) return;
+        const sameCohort = source.membershipKey === target.membershipKey;
+        const hasSharedGroup = source.constellations.some((name) =>
+          target.constellations.includes(name));
+        const targetDistance = Math.hypot(
+          source.targetX - target.targetX, source.targetY - target.targetY);
+        springPairs.set(key, {
+          source, target,
+          distance: isGroup ? Math.max(85, targetDistance * 0.9) :
+            sameCohort ? 65 : Math.max(85, targetDistance * 0.7),
+          strength: isGroup ? 0.02 : sameCohort ? 0.18 : hasSharedGroup ? 0.065 : 0.025,
+        });
+      });
+      const springs = [...springPairs.values()];
+      // Reuse the same geometry for the mini map and subsequent visits. Any
+      // change to IDs, memberships or follow targets invalidates the cache.
+      const layoutKey = !isGroup ? JSON.stringify(nodes.map((node) => [
+        node.id, node.membershipKey,
+        (node.follow || []).map((link) => link.target).sort(),
+      ])) : "";
+      let cachedLayout = !isGroup ? baseLayoutCache.get(layoutKey) : null;
+      if (!isGroup && !cachedLayout) {
+        try {
+          const saved = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) || "null");
+          if (saved?.key === layoutKey && saved.points?.length === nodes.length &&
+              saved.points.every((point, index) => point[0] === nodes[index].id &&
+                Number.isFinite(point[1]) && Number.isFinite(point[2]))) {
+            cachedLayout = saved.points;
+            baseLayoutCache.set(layoutKey, cachedLayout);
+          }
+        } catch { /* Storage may be unavailable; calculate normally. */ }
+      }
+      if (cachedLayout) {
+        nodes.forEach((node, index) => {
+          node.x = cachedLayout[index][1];
+          node.y = cachedLayout[index][2];
+        });
+      } else if (!isGroup) {
+        const simulation = d3.forceSimulation(nodes)
+          .randomSource(d3.randomLcg(0.42))
+          .force("x", d3.forceX((node) => node.targetX).strength(isGroup ? 0.12 : 0.2))
+          .force("y", d3.forceY((node) => node.targetY).strength(isGroup ? 0.12 : 0.2))
+          .force("follow", d3.forceLink(springs).id((node) => node.id)
+            .distance((link) => link.distance).strength((link) => link.strength))
+          .force("charge", d3.forceManyBody().strength(-4))
+          .force("collision", d3.forceCollide(IMAGE_SIZE * 0.76).iterations(3))
+          .stop();
+        // Both full atlas and mini map run the same deterministic calculation.
+        for (let index = 0; index < (isGroup ? 0 : 240); index += 1) simulation.tick();
+
+        const points = nodes.map((node) => [node.id, node.x, node.y]);
+        if (baseLayoutCache.size >= 4) baseLayoutCache.delete(baseLayoutCache.keys().next().value);
+        baseLayoutCache.set(layoutKey, points);
+        try {
+          localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({ key: layoutKey, points }));
+        } catch { /* A full storage quota must not stop the atlas. */ }
+      }
+
+      // Titles sit beyond the outermost members of their own radial sector.
+      groupNames.forEach((name) => {
+        const anchor = anchors.get(name);
+        const dx = anchor.x - center.x;
+        const dy = anchor.y - center.y;
+        const length = Math.hypot(dx, dy);
+        const ux = dx / length;
+        const uy = dy / length;
+        const members = nodes.filter((node) => node.constellations.includes(name));
+        const extent = d3.max(members, (node) =>
+          (node.x - center.x) * ux + (node.y - center.y) * uy) || 0;
+        const gridBoundary = isGroup ? Math.min(
+          (groupGrid.halfWidth + 30) / Math.max(Math.abs(ux), 0.0001),
+          (groupGrid.halfHeight + 30) / Math.max(Math.abs(uy), 0.0001),
+        ) : 0;
+        const radius = isGroup ? gridBoundary + 155 :
+          Math.max(length * 0.91, extent) + 105;
+        groupLabelBasePositions.set(name, {
+          x: center.x + ux * radius,
+          y: center.y + uy * radius,
+        });
+      });
+
+      nodes.forEach((node, index) => {
+        node.baseX = node.x;
+        node.baseY = node.y;
+        node.motionPhase = index * 2.399963229728653;
+        node.ambientScale = 1;
+      });
+
+      // Fit the real node layout rather than the larger abstract world. This
+      // removes the empty border that used to appear in the overview.
+      const groupLabelPositions = visibleGroupNames.map((name) => groupLabelBasePositions.get(name));
+      // A fixed frame in group views preserves the atlas directions, even
+      // when only one or two of the surrounding groups are related.
+      if (isGroup) groupLabelPositions.push(
+        { x: center.x - groupGrid.halfWidth - 185, y: center.y - groupGrid.halfHeight - 185 },
+        { x: center.x + groupGrid.halfWidth + 185, y: center.y + groupGrid.halfHeight + 185 },
+      );
+      const layoutBounds = {
+        minX:
+          Math.min(
+            d3.min(nodes, (node) => node.x),
+            d3.min(groupLabelPositions, (position) => position.x) - 85,
+          ) - OVERVIEW_PADDING,
+        minY:
+          Math.min(
+            d3.min(nodes, (node) => node.y),
+            d3.min(groupLabelPositions, (position) => position.y) - 24,
+          ) - OVERVIEW_PADDING,
+        maxX:
+          Math.max(
+            d3.max(nodes, (node) => node.x),
+            d3.max(groupLabelPositions, (position) => position.x) + 85,
+          ) + OVERVIEW_PADDING,
+        maxY:
+          Math.max(
+            d3.max(nodes, (node) => node.y),
+            d3.max(groupLabelPositions, (position) => position.y) + 24,
+          ) + OVERVIEW_PADDING,
+      };
+
+      let width = 1;
+      let height = 1;
+      let pixelRatio = Math.min(window.devicePixelRatio || 1, isMini ? 2 : 1.5);
+      let transform = d3.zoomIdentity;
+      let overviewScale = 1;
+      let hoveredNode = null;
+      let hoveredGroup = null;
+      let animationFrame = 0;
+      let drawPending = false;
+      let hasExplored = false;
+      let hasAppliedInitialFocus = false;
+      let motionFrame = 0;
+      let lastMotionDraw = 0;
+      const prefersReducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+
+      const scheduleDraw = () => {
+        drawPending = true;
+        if (animationFrame || !root.isConnected || document.hidden) return;
+        animationFrame = requestAnimationFrame(motionLoop);
+      };
+
+      const zoomRatio = () => transform.k / Math.max(overviewScale, 0.0001);
+
+      const zoomStage = () => {
+        const ratio = zoomRatio();
+        if (ratio < ZOOM_STAGES.groups) return 1;
+        if (ratio < ZOOM_STAGES.visualLabels) return 2;
+        if (ratio < ZOOM_STAGES.mediaDetails) return 3;
+        if (ratio < ZOOM_STAGES.relationships) return 4;
+        return 5;
+      };
+
+      const groupHitHalfWidth = (name) =>
+        Math.max(30, name.length * (zoomStage() >= 2 ? 6.8 : 4.8));
+      const groupHitHalfHeight = () => zoomStage() >= 2 ? 20 : 16;
+
+      const updateNodeMotion = (stage, time) => {
+        // A title hover changes colour only: preserve the current positions
+        // and sizes, including any ambient drift already visible on entry.
+        if (!isMini && !isGroup && hoveredGroup) return;
+        if (stage < 3 || prefersReducedMotion || isGroup) {
+          groupMotion.forEach((motion) => {
+            motion.x = 0;
+            motion.y = 0;
+          });
+          nodes.forEach((node) => {
+            node.x = node.baseX;
+            node.y = node.baseY;
+            node.ambientScale = 1;
+          });
+          return;
+        }
+
+        const [centerX, centerY] = transform.invert([width / 2, height / 2]);
+        const viewRadius =
+          Math.max(width, height) / Math.max(transform.k * 1.25, 0.0001);
+        const extraScale = Math.min(0.18, (zoomRatio() - 2) * 0.035);
+        const groupFloatAmount = Math.min(6, 2 + (zoomRatio() - 2));
+
+        // Each constellation has its own phase, so a cluster moves as one body
+        // while neighbouring clusters slowly separate and overlap again.
+        groupMotion.forEach((motion) => {
+          motion.x =
+            Math.sin(time * 0.00019 + motion.phase) * groupFloatAmount;
+          motion.y =
+            Math.cos(time * 0.00016 + motion.phase * 1.31) *
+            groupFloatAmount *
+            0.72;
+        });
+
+        nodes.forEach((node) => {
+          const isVisual = node.type === "image" || node.type === "video";
+          const motionNames = node.constellations;
+          const motions = motionNames
+            .map((name) => groupMotion.get(name))
+            .filter(Boolean);
+          const groupX = d3.mean(motions, (motion) => motion.x) || 0;
+          const groupY = d3.mean(motions, (motion) => motion.y) || 0;
+
+          const distance = Math.hypot(
+            node.baseX - centerX,
+            node.baseY - centerY,
+          );
+          const focus = Math.max(0, 1 - distance / viewRadius);
+          const localFloatAmount = isVisual ? 0.45 + focus * 1.05 : 0;
+          const frozen = node === hoveredNode;
+
+          node.x =
+            node.baseX +
+            groupX +
+            (frozen
+              ? 0
+              : Math.sin(time * 0.00038 + node.motionPhase) *
+                localFloatAmount);
+          node.y =
+            node.baseY +
+            groupY +
+            (frozen
+              ? 0
+              : Math.cos(time * 0.00032 + node.motionPhase * 1.17) *
+                localFloatAmount);
+          node.ambientScale = isVisual
+            ? 1 + focus * (0.05 + extraScale)
+            : 1;
+        });
+      };
+
+      // Interaction and motion share one RAF queue. Slow drifting uses 30 fps
+      // and pauses while a home-atlas group title is hovered.
+      const ambientMotionWanted = () => zoomStage() >= 3 &&
+        !prefersReducedMotion && !hoveredGroup && !isMini && !isGroup;
+
+      const motionLoop = (time) => {
+        animationFrame = 0;
+        motionFrame = 0;
+        if (!root.isConnected || document.hidden) return;
+        if (drawPending ||
+            (ambientMotionWanted() && time - lastMotionDraw >= 33)) {
+          drawPending = false;
+          lastMotionDraw = time;
+          draw(time);
+        }
+        if (drawPending || ambientMotionWanted()) {
+          animationFrame = requestAnimationFrame(motionLoop);
+          motionFrame = animationFrame;
+        }
+      };
+
+      const ensureMotion = () => {
+        if (isMini || isGroup || !ambientMotionWanted()) return;
+        scheduleDraw();
+        motionFrame = animationFrame;
+      };
+
+      const onVisibilityChange = () => {
+        if (!root.isConnected) {
+          document.removeEventListener("visibilitychange", onVisibilityChange);
+          return;
+        }
+        if (document.hidden) {
+          cancelAnimationFrame(animationFrame);
+          animationFrame = 0;
+          motionFrame = 0;
+        } else {
+          scheduleDraw();
+        }
+      };
+      document.addEventListener("visibilitychange", onVisibilityChange);
+
+      const isVisible = (node, margin = 90) => {
+        margin = Math.max(margin, IMAGE_SIZE * mediaScale * transform.k * 2);
+        const topLeft = transform.invert([-margin, -margin]);
+        const bottomRight = transform.invert([width + margin, height + margin]);
+        return (
+          node.x >= topLeft[0] &&
+          node.x <= bottomRight[0] &&
+          node.y >= topLeft[1] &&
+          node.y <= bottomRight[1]
+        );
+      };
+
+      const linksBySource = new Map(nodes.map((node) => [node.id, []]));
+      links.forEach((link) => linksBySource.get(link.source.id).push(link));
+      const connectionIds = new Map(nodes.map((node) => [node.id,
+        new Set([node.id, ...linksBySource.get(node.id).map((link) => link.target.id)])]));
+      const emptyConnections = new Set();
+      const activeLinksFor = (node) => node ? linksBySource.get(node.id) : [];
+      const connectedIdsFor = (node) => node ? connectionIds.get(node.id) : emptyConnections;
+
+      // A stationary title makes hover stable throughout the animation.
+      const labelPositionFor = (name) => groupLabelBasePositions.get(name);
+
+      // The longest edge keeps the existing icon size; the other edge follows
+      // the source ratio. The same bounds are used for drawing and interaction.
+      const dimensionsFor = (node, size, stage = zoomStage()) => {
+        const image = node.imageElement;
+        if (image?.complete && image.naturalWidth && image.naturalHeight) {
+          const longest = Math.max(image.naturalWidth, image.naturalHeight);
+          return {
+            width: size * image.naturalWidth / longest,
+            height: size * image.naturalHeight / longest,
+          };
+        }
+        if (node.type === "audio") {
+          if (isGroup) return { width: size, height: size * 34 / 50 };
+          return { width: size * 50 / 46, height: size * 34 / 46 };
+        }
+        if (node.type === "video") {
+          return { width: size, height: size * 34 / 46 };
+        }
+        if (node.type === "text") {
+          if (isGroup) return { width: size * 58 / 72, height: size };
+          const detailed = stage >= 4 || node === hoveredNode;
+          return {
+            width: size * (detailed ? 58 : 36) / 46,
+            height: size * (detailed ? 72 : 46) / 46,
+          };
+        }
+        return { width: size, height: size };
+      };
+
+      const interactionScaleFor = (node, stage, connectedIds) =>
+        node === hoveredNode ? 1.45 :
+          stage >= 5 && hoveredNode && connectedIds.has(node.id) ? 1.65 : 1;
+
+      const visualBoundsFor = (node, stage, connectedIds) => {
+        const size = (node.isBridge ? BRIDGE_SIZE : IMAGE_SIZE) * mediaScale *
+          (node.ambientScale || 1) * interactionScaleFor(node, stage, connectedIds);
+        return dimensionsFor(node, size, stage);
+      };
+
+      const drawProportionalImage = (image, x, y, bounds) => {
+        context.drawImage(
+          image,
+          x - bounds.width / 2,
+          y - bounds.height / 2,
+          bounds.width,
+          bounds.height,
+        );
+      };
+
+      const drawVideoMarker = (node, bounds) => {
+        const shortestEdge = Math.min(bounds.width, bounds.height);
+        const markerSize = Math.min(shortestEdge * 0.45, Math.max(8, shortestEdge * 0.22));
+        const margin = shortestEdge * 0.09;
+        const markerX =
+          node.x + bounds.width / 2 - margin - markerSize / 2;
+        const markerY =
+          node.y + bounds.height / 2 - margin - markerSize / 2;
+
+        context.save();
+        context.translate(markerX, markerY);
+        context.beginPath();
+        context.moveTo(-markerSize * 0.34, -markerSize * 0.5);
+        context.lineTo(markerSize * 0.48, 0);
+        context.lineTo(-markerSize * 0.34, markerSize * 0.5);
+        context.closePath();
+        context.lineJoin = "round";
+
+        // A faint dark under-stroke keeps the white outline visible on light
+        // footage without adding a conventional circular play-button ground.
+        context.strokeStyle = "rgba(0, 0, 0, 0.28)";
+        context.lineWidth = 3 / transform.k;
+        context.stroke();
+        context.strokeStyle = "rgba(255, 255, 255, 0.92)";
+        context.lineWidth = 1.25 / transform.k;
+        context.stroke();
+        context.restore();
+      };
+
+      const drawAudio = (node, scale = 1, detailZoom = transform.k) => {
+        context.save();
+        context.translate(node.x, node.y);
+        context.scale(scale, scale);
+
+        const cassetteWidth = 50;
+        const cassetteHeight = 34;
+        const left = -cassetteWidth / 2;
+        const right = cassetteWidth / 2;
+        const top = -cassetteHeight / 2;
+        const bottom = cassetteHeight / 2;
+
+        // Soft white plastic shell with clipped upper corners.
+        context.shadowColor = "rgba(55, 50, 42, 0.16)";
+        context.shadowBlur = 3 / detailZoom;
+        context.shadowOffsetY = 1.2 / detailZoom;
+        context.beginPath();
+        context.moveTo(left + 3.5, top);
+        context.lineTo(right - 3.5, top);
+        context.lineTo(right, top + 3.5);
+        context.lineTo(right, bottom);
+        context.lineTo(left, bottom);
+        context.lineTo(left, top + 3.5);
+        context.closePath();
+        context.fillStyle = "#f1f1ec";
+        context.fill();
+        context.shadowColor = "transparent";
+        context.shadowBlur = 0;
+        context.shadowOffsetY = 0;
+        context.strokeStyle = "rgba(70, 68, 62, 0.22)";
+        context.lineWidth = 0.55 / detailZoom;
+        context.stroke();
+
+        // Inner recessed panel.
+        context.fillStyle = "rgba(222, 222, 216, 0.38)";
+        context.fillRect(left + 3, top + 4, cassetteWidth - 6, 17);
+
+        // Central tape window.
+        context.fillStyle = "rgba(248, 248, 244, 0.95)";
+        context.fillRect(-7.5, -8, 15, 10.5);
+        context.fillStyle = "rgba(61, 56, 50, 0.72)";
+        context.fillRect(-5.2, -7.1, 4.4, 8.7);
+        context.fillStyle = "rgba(255, 255, 252, 0.9)";
+        context.fillRect(1.1, -7.1, 4.1, 8.7);
+
+        // Two reels with small radial teeth.
+        [-13, 13].forEach((reelX) => {
+          context.beginPath();
+          context.arc(reelX, -2.5, 5.6, 0, Math.PI * 2);
+          context.fillStyle = "rgba(255, 255, 251, 0.98)";
+          context.fill();
+          context.strokeStyle = "rgba(94, 91, 82, 0.28)";
+          context.lineWidth = 0.5 / detailZoom;
+          context.stroke();
+
+          context.beginPath();
+          context.arc(reelX, -2.5, 2.2, 0, Math.PI * 2);
+          context.fillStyle = "rgba(193, 193, 185, 0.58)";
+          context.fill();
+
+          for (let index = 0; index < 6; index += 1) {
+            const angle = (index / 6) * Math.PI * 2;
+            context.beginPath();
+            context.moveTo(
+              reelX + Math.cos(angle) * 3,
+              -2.5 + Math.sin(angle) * 3,
+            );
+            context.lineTo(
+              reelX + Math.cos(angle) * 4.5,
+              -2.5 + Math.sin(angle) * 4.5,
+            );
+            context.strokeStyle = "rgba(110, 106, 97, 0.36)";
+            context.lineWidth = 0.7 / detailZoom;
+            context.stroke();
+          }
+        });
+
+        // Lower trapezoid and tape-head openings.
+        context.beginPath();
+        context.moveTo(-17, 5);
+        context.lineTo(17, 5);
+        context.lineTo(20, bottom);
+        context.lineTo(-20, bottom);
+        context.closePath();
+        context.fillStyle = "rgba(226, 225, 218, 0.72)";
+        context.fill();
+        [-12, -4, 4, 12].forEach((holeX, index) => {
+          context.beginPath();
+          context.arc(holeX, 12.2, index === 0 || index === 3 ? 1.8 : 1.3, 0, Math.PI * 2);
+          context.fillStyle = "rgba(125, 121, 111, 0.34)";
+          context.fill();
+        });
+
+        // Small screw heads.
+        [
+          [left + 3.2, top + 3],
+          [right - 3.2, top + 3],
+          [left + 3.2, bottom - 3],
+          [right - 3.2, bottom - 3],
+          [0, 7.5],
+        ].forEach(([screwX, screwY]) => {
+          context.beginPath();
+          context.arc(screwX, screwY, 1.05, 0, Math.PI * 2);
+          context.fillStyle = "rgba(92, 88, 80, 0.48)";
+          context.fill();
+          context.beginPath();
+          context.moveTo(screwX - 0.65, screwY);
+          context.lineTo(screwX + 0.65, screwY);
+          context.strokeStyle = "rgba(250, 250, 247, 0.78)";
+          context.lineWidth = 0.35 / detailZoom;
+          context.stroke();
+        });
+
+        context.restore();
+      };
+
+      const drawVideo = (node, scale = 1) => {
+        context.save();
+        context.translate(node.x, node.y);
+        context.scale(scale, scale);
+        context.fillStyle = "#ffffff";
+        context.strokeStyle = "#252525";
+        context.lineWidth = 1.1 / transform.k;
+        context.fillRect(-23, -17, 46, 34);
+        context.strokeRect(-23, -17, 46, 34);
+        context.fillStyle = "#252525";
+        context.beginPath();
+        context.moveTo(-5, -9);
+        context.lineTo(10, 0);
+        context.lineTo(-5, 9);
+        context.closePath();
+        context.fill();
+        context.restore();
+      };
+
+      const drawText = (node, scale = 1, stage = 1, detailZoom = transform.k) => {
+        context.save();
+        context.translate(node.x, node.y);
+        context.scale(scale, scale);
+        const showsContent = isGroup || stage >= 4 || node === hoveredNode;
+        const cardWidth = showsContent ? 58 : 36;
+        const cardHeight = showsContent ? 72 : 46;
+        const leftEdge = -cardWidth / 2;
+        const rightEdge = cardWidth / 2;
+        const topEdge = -cardHeight / 2;
+        const bottomEdge = cardHeight / 2;
+        const curlSize = showsContent ? 9 : 5.5;
+
+        const tracePaperShape = () => {
+          context.beginPath();
+          context.moveTo(leftEdge, topEdge + 0.35);
+          const topSegments = 12;
+          for (let index = 1; index <= topSegments; index += 1) {
+            const x = leftEdge + (cardWidth * index) / topSegments;
+            const y = topEdge + (index % 2 === 0 ? 0.15 : 0.55);
+            context.lineTo(x, y);
+          }
+          context.lineTo(rightEdge, bottomEdge - curlSize * 1.25);
+          context.quadraticCurveTo(
+            rightEdge,
+            bottomEdge - curlSize * 0.2,
+            rightEdge - curlSize,
+            bottomEdge,
+          );
+          context.lineTo(leftEdge, bottomEdge);
+          context.closePath();
+        };
+
+        // Warm paper with a soft edge: no hard black frame.
+        context.shadowColor = "rgba(58, 48, 36, 0.16)";
+        context.shadowBlur = 4 / detailZoom;
+        context.shadowOffsetX = 1.2 / detailZoom;
+        context.shadowOffsetY = 1.8 / detailZoom;
+        context.fillStyle = "#f0ecdf";
+        tracePaperShape();
+        context.fill();
+        context.shadowColor = "transparent";
+        context.shadowBlur = 0;
+        context.shadowOffsetX = 0;
+        context.shadowOffsetY = 0;
+
+        // Deterministic fibres create a paper texture without another asset.
+        const paperSeed = Array.from(node.id).reduce(
+          (total, character) => total + character.charCodeAt(0),
+          0,
+        );
+        context.save();
+        tracePaperShape();
+        context.clip();
+        context.strokeStyle = "rgba(102, 88, 62, 0.12)";
+        context.lineWidth = 0.35 / detailZoom;
+        for (let index = 0; index < 18; index += 1) {
+          const first =
+            Math.sin((paperSeed + index * 17.13) * 12.9898) * 43758.5453;
+          const second =
+            Math.sin((paperSeed + index * 31.71) * 7.233) * 19423.115;
+          const third =
+            Math.sin((paperSeed + index * 47.29) * 3.177) * 9271.417;
+          const x = (first - Math.floor(first) - 0.5) * cardWidth;
+          const y = (second - Math.floor(second) - 0.5) * cardHeight;
+          const length = 1.5 + (third - Math.floor(third)) * 3.5;
+          context.beginPath();
+          context.moveTo(x, y);
+          context.lineTo(x + length, y + length * 0.18);
+          context.stroke();
+        }
+        context.restore();
+
+        // A quiet horizontal crease, similar to a once-folded sheet.
+        const foldY = topEdge + cardHeight * 0.49;
+        context.beginPath();
+        context.moveTo(leftEdge + 1.5, foldY);
+        context.quadraticCurveTo(
+          0,
+          foldY + 0.65,
+          rightEdge - 1.5,
+          foldY + 0.1,
+        );
+        context.strokeStyle = "rgba(107, 91, 66, 0.14)";
+        context.lineWidth = 0.55 / detailZoom;
+        context.stroke();
+
+        // The lower-right corner softly turns up; no paperclip is used.
+        context.save();
+        context.shadowColor = "rgba(54, 43, 30, 0.22)";
+        context.shadowBlur = 2.5 / detailZoom;
+        context.shadowOffsetX = 1 / detailZoom;
+        context.shadowOffsetY = 1.2 / detailZoom;
+        context.beginPath();
+        context.moveTo(rightEdge, bottomEdge - curlSize * 1.25);
+        context.quadraticCurveTo(
+          rightEdge - curlSize * 0.25,
+          bottomEdge - curlSize * 0.35,
+          rightEdge - curlSize,
+          bottomEdge,
+        );
+        context.lineTo(rightEdge - curlSize * 0.72, bottomEdge - curlSize * 0.7);
+        context.closePath();
+        context.fillStyle = "rgba(205, 195, 176, 0.92)";
+        context.fill();
+        context.restore();
+
+        if (showsContent) {
+          // Keep every line inside the paper card.
+          context.beginPath();
+          context.rect(
+            -cardWidth / 2 + 4,
+            -cardHeight / 2 + 4,
+            cardWidth - 8,
+            cardHeight - 8,
+          );
+          context.clip();
+
+          const left = -cardWidth / 2 + 5;
+          let textY = -cardHeight / 2 + 6;
+          context.textAlign = "left";
+          context.textBaseline = "top";
+          context.fillStyle = "#171717";
+          context.globalAlpha = 1;
+
+          context.font = `700 5.8px ${CONTENT_FONT}`;
+          const titleLines = wrapCanvasText(node.titleEn || node.title, cardWidth - 10, 2);
+          titleLines.forEach((line) => {
+            context.fillText(line, left, textY);
+            textY += 7;
+          });
+
+          if (titleLines.length && node.excerpt) textY += 2;
+
+          context.font = `4.6px ${CONTENT_FONT}`;
+          context.globalAlpha = 0.78;
+          const excerptLines = wrapCanvasText(
+            node.excerpt,
+            cardWidth - 10,
+            titleLines.length > 1 ? 6 : 7,
+          );
+          excerptLines.forEach((line) => {
+            if (textY <= cardHeight / 2 - 7) {
+              context.fillText(line, left, textY);
+              textY += 5.8;
+            }
+          });
+
+          context.restore();
+          return;
+        }
+        context.restore();
+      };
+
+      const wordSegmenter = typeof Intl.Segmenter === "function"
+        ? new Intl.Segmenter(undefined, { granularity: "word" }) : null;
+      const textWrapCache = new Map();
+      const wrapCanvasText = (value, maximumWidth, maximumLines = 3) => {
+        const text = String(value || "").replace(/\s+/g, " ").trim();
+        if (!text) return [];
+        const cacheKey = JSON.stringify([context.font, maximumWidth, maximumLines, text]);
+        if (textWrapCache.has(cacheKey)) return textWrapCache.get(cacheKey);
+        const tokens = wordSegmenter
+          ? Array.from(wordSegmenter.segment(text), (part) => part.segment)
+          : Array.from(text);
+
+        const lines = [];
+        let line = "";
+        tokens.forEach((token) => {
+          const candidate = line + token;
+          if (line && context.measureText(candidate).width > maximumWidth) {
+            lines.push(line.trim());
+            line = token.trimStart();
+          } else {
+            line = candidate;
+          }
+        });
+        if (line.trim()) lines.push(line.trim());
+
+        const visibleLines = lines.slice(0, maximumLines);
+        if (lines.length > maximumLines && visibleLines.length) {
+          visibleLines[visibleLines.length - 1] = `${shortened(
+            visibleLines[visibleLines.length - 1],
+            34,
+          )}`;
+        }
+        if (textWrapCache.size >= 128) textWrapCache.delete(textWrapCache.keys().next().value);
+        textWrapCache.set(cacheKey, visibleLines);
+        return visibleLines;
+      };
+
+      const drawHoverLabel = (node, bounds) => {
+        if (node !== hoveredNode || node.type === "text") return;
+
+        const hoverText =
+          node.type === "audio"
+            ? node.description || node.label
+            : node.alt || node.label;
+        if (!hoverText) return;
+
+        context.save();
+        context.beginPath();
+        context.rect(node.x - bounds.width / 2, node.y - bounds.height / 2,
+          bounds.width, bounds.height);
+        context.clip();
+        context.fillStyle = "rgba(255, 255, 255, 0.58)";
+        context.fillRect(node.x - bounds.width / 2, node.y - bounds.height / 2,
+          bounds.width, bounds.height);
+
+        const fontSize = Math.max(4.8, 9 / transform.k);
+        const lineHeight = fontSize * 1.18;
+        context.font = `400 ${fontSize}px ${CONTENT_FONT}`;
+        const maximumLines = Math.min(3, Math.floor(bounds.height * 0.82 / lineHeight));
+        if (maximumLines < 1) {
+          context.restore();
+          return;
+        }
+        const lines = wrapCanvasText(
+          shortened(hoverText, 58),
+          bounds.width * 0.82,
+          maximumLines,
+        );
+        const totalHeight = lines.length * lineHeight;
+        const startY = node.y - totalHeight / 2 + lineHeight * 0.08;
+
+        context.globalAlpha = 1;
+        context.textAlign = "center";
+        context.textBaseline = "top";
+        context.fillStyle = "#171717";
+        lines.forEach((line, index) => {
+          context.fillText(line, node.x, startY + index * lineHeight);
+        });
+        context.restore();
+      };
+
+      const drawAudioDescription = (node, nodeSize) => {
+        if (!node.description || node === hoveredNode) return;
+
+        const fontSize = 4.6;
+        const lineHeight = 5.5;
+        context.save();
+        const scale = isGroup ? nodeSize / 50 : 1;
+        const localSize = nodeSize / scale;
+        context.translate(node.x, node.y);
+        context.scale(scale, scale);
+
+        // Group pages show the description immediately inside the cassette.
+        context.fillStyle = "rgba(255, 255, 255, 0.7)";
+        context.fillRect(
+          -localSize * 0.5,
+          -localSize * 0.34,
+          localSize,
+          localSize * 0.68,
+        );
+
+        context.font = `400 ${fontSize}px ${CONTENT_FONT}`;
+        const lines = wrapCanvasText(
+          shortened(node.description, 72),
+          localSize * 0.88,
+          3,
+        );
+        const totalHeight = lines.length * lineHeight;
+        const startY = -totalHeight / 2 + lineHeight * 0.08;
+        context.textAlign = "center";
+        context.textBaseline = "top";
+        context.fillStyle = "#171717";
+        lines.forEach((line, index) => {
+          context.fillText(line, 0, startY + index * lineHeight);
+        });
+        context.restore();
+      };
+
+      const drawGroupHoverVeil = (node, bounds) => {
+        // Local constellation pages retain their existing hover treatment.
+        if (!isGroup || !hoveredGroup || !node.constellations.includes(hoveredGroup)) return;
+        context.save();
+        context.fillStyle = "rgba(255, 255, 255, 0.16)";
+        context.fillRect(node.x - bounds.width / 2, node.y - bounds.height / 2,
+          bounds.width, bounds.height);
+        context.restore();
+      };
+
+      const iconCache = new Map();
+      const drawCachedIcon = (node, nodeScale, stage) => {
+        const detailed = node.type === "text" && (isGroup || stage >= 4 || node === hoveredNode);
+        const rasterScale = Math.min(8, Math.pow(2, Math.ceil(Math.log2(
+          Math.max(1, nodeScale * transform.k * pixelRatio)))));
+        const cacheKey = `${node.type === "audio" ? "audio" : node.id}:${detailed}:${rasterScale}`;
+        let sprite = iconCache.get(cacheKey);
+        if (!sprite) {
+          const padding = 10;
+          const iconWidth = node.type === "audio" ? 50 : detailed ? 58 : 36;
+          const iconHeight = node.type === "audio" ? 34 : detailed ? 72 : 46;
+          const surface = document.createElement("canvas");
+          surface.width = (iconWidth + padding * 2) * rasterScale;
+          surface.height = (iconHeight + padding * 2) * rasterScale;
+          const spriteContext = surface.getContext("2d");
+          if (!spriteContext) {
+            if (node.type === "audio") drawAudio(node, nodeScale);
+            else drawText(node, nodeScale, stage);
+            return;
+          }
+          const mainContext = context;
+          context = spriteContext;
+          try {
+            context.translate(surface.width / 2, surface.height / 2);
+            context.scale(rasterScale, rasterScale);
+            const centredNode = { ...node, x: 0, y: 0 };
+            if (node.type === "audio") drawAudio(centredNode, 1, 1);
+            else drawText(centredNode, 1, detailed ? 4 : 1, 1);
+          } finally {
+            context = mainContext;
+          }
+          sprite = { surface, width: iconWidth + padding * 2, height: iconHeight + padding * 2 };
+          if (iconCache.size >= 64) iconCache.delete(iconCache.keys().next().value);
+          iconCache.set(cacheKey, sprite);
+        }
+        context.drawImage(sprite.surface,
+          node.x - sprite.width * nodeScale / 2,
+          node.y - sprite.height * nodeScale / 2,
+          sprite.width * nodeScale, sprite.height * nodeScale);
+      };
+
+      const drawNodeArtwork = (node, nodeScale, nodeSize, bounds, stage) => {
+        if (node.imageElement?.complete && node.imageElement.naturalWidth) {
+          drawProportionalImage(node.imageElement, node.x, node.y, bounds);
+          context.strokeStyle = "rgba(0, 0, 0, 0.22)";
+          context.lineWidth = 0.8 / transform.k;
+          context.strokeRect(
+            node.x - bounds.width / 2,
+            node.y - bounds.height / 2,
+            bounds.width,
+            bounds.height,
+          );
+
+          if (node.type === "video") {
+            drawVideoMarker(node, bounds);
+          }
+        } else if (node.type === "audio") {
+          drawCachedIcon(node, isGroup ? nodeSize / 50 : nodeScale, stage);
+        } else if (node.type === "video") {
+          drawVideo(node, nodeScale);
+        } else if (node.type === "text") {
+          drawCachedIcon(node, isGroup ? nodeSize / 72 : nodeScale, stage);
+        } else {
+          context.fillStyle = "#eeeeeb";
+          context.fillRect(
+            node.x - nodeSize / 2,
+            node.y - nodeSize / 2,
+            nodeSize,
+            nodeSize,
+          );
+        }
+
+        if ((isGroup || stage >= 4) && node.type === "audio") {
+          drawAudioDescription(node, nodeSize);
+        }
+
+        drawGroupHoverVeil(node, bounds);
+        drawHoverLabel(node, bounds);
+      };
+
+      // Reuse one transparent surface for title-hover colour treatment.
+      // source-atop keeps tint within each icon's own silhouette, including
+      // the paper edge and cassette corners; no rectangular frame is added.
+      const groupEffectSurface = document.createElement("canvas");
+      const groupEffectContext = groupEffectSurface.getContext("2d");
+      const GROUP_OTHER_OPACITY = 0.22;
+
+      const drawGroupColouredNode = (node, nodeScale, nodeSize, bounds, stage) => {
+        const isMember = node.constellations.includes(hoveredGroup);
+        const rasterScale = Math.max(0.01, transform.k * pixelRatio);
+        const padding = 12 * nodeScale + 4 / transform.k;
+        const left = node.x - bounds.width / 2 - padding;
+        const top = node.y - bounds.height / 2 - padding;
+        const surfaceWidth = Math.max(1, Math.ceil((bounds.width + padding * 2) * rasterScale));
+        const surfaceHeight = Math.max(1, Math.ceil((bounds.height + padding * 2) * rasterScale));
+        if (groupEffectSurface.width !== surfaceWidth) groupEffectSurface.width = surfaceWidth;
+        if (groupEffectSurface.height !== surfaceHeight) groupEffectSurface.height = surfaceHeight;
+        groupEffectContext.setTransform(1, 0, 0, 1, 0, 0);
+        groupEffectContext.clearRect(0, 0, surfaceWidth, surfaceHeight);
+        groupEffectContext.save();
+        groupEffectContext.setTransform(rasterScale, 0, 0, rasterScale,
+          -left * rasterScale, -top * rasterScale);
+        groupEffectContext.filter = "grayscale(1)";
+
+        const mainContext = context;
+        context = groupEffectContext;
+        try {
+          drawNodeArtwork(node, nodeScale, nodeSize, bounds, stage);
+        } finally {
+          context = mainContext;
+          groupEffectContext.restore();
+        }
+
+        if (isMember) {
+          groupEffectContext.save();
+          groupEffectContext.globalCompositeOperation = "source-atop";
+          groupEffectContext.fillStyle = "rgba(255, 255, 255, 0.12)";
+          groupEffectContext.fillRect(0, 0, surfaceWidth, surfaceHeight);
+          groupEffectContext.fillStyle = d3.color(groupColors.get(hoveredGroup) || MINI_NEUTRAL_COLOR)
+            .copy({ opacity: 0.52 }).formatRgb();
+          groupEffectContext.fillRect(0, 0, surfaceWidth, surfaceHeight);
+          groupEffectContext.restore();
+        }
+
+        context.save();
+        context.globalAlpha = isMember ? 1 : GROUP_OTHER_OPACITY;
+        context.drawImage(groupEffectSurface, left, top,
+          surfaceWidth / rasterScale, surfaceHeight / rasterScale);
+        context.restore();
+      };
+
+      const drawNode = (node, stage, connectedIds) => {
+        const nodeScale = interactionScaleFor(node, stage, connectedIds) *
+          (node.ambientScale || 1) * mediaScale;
+        const baseSize = node.isBridge ? BRIDGE_SIZE : IMAGE_SIZE;
+        const nodeSize = baseSize * nodeScale;
+        const bounds = dimensionsFor(node, nodeSize, stage);
+        const groupColourHover = !isMini && Boolean(hoveredGroup);
+        if (groupColourHover && groupEffectContext) {
+          drawGroupColouredNode(node, nodeScale, nodeSize, bounds, stage);
+          return;
+        }
+
+        const dimmedByNode = Boolean(hoveredNode) && !connectedIds.has(node.id);
+        const dimmedByGroup = hoveredGroup && !node.constellations.includes(hoveredGroup);
+        context.save();
+        context.globalAlpha = dimmedByNode || dimmedByGroup ? 0.1 : 1;
+        drawNodeArtwork(node, nodeScale, nodeSize, bounds, stage);
+        context.restore();
+      };
+
+      const drawFocusMarker = (node, compact = false) => {
+        if (!node) return;
+
+        if (compact) {
+          // Preserve each membership colour rather than averaging colours.
+          const names = node.constellations;
+          context.save();
+          context.beginPath();
+          context.arc(node.baseX, node.baseY, 8.5 / transform.k, 0, Math.PI * 2);
+          context.fillStyle = "#ffffff";
+          context.globalAlpha = 0.95;
+          context.fill();
+          context.globalAlpha = 1;
+          names.forEach((name, index) => {
+            const start = -Math.PI / 2 + index * Math.PI * 2 / names.length;
+            const end = -Math.PI / 2 + (index + 1) * Math.PI * 2 / names.length;
+            context.beginPath();
+            context.arc(node.baseX, node.baseY, 6.5 / transform.k,
+              start + (names.length > 1 ? 0.07 : 0), end - (names.length > 1 ? 0.07 : 0));
+            context.strokeStyle = groupColors.get(name) || MINI_NEUTRAL_COLOR;
+            context.lineWidth = 2.3 / transform.k;
+            context.stroke();
+          });
+          context.beginPath();
+          context.arc(node.baseX, node.baseY, 2.1 / transform.k, 0, Math.PI * 2);
+          context.fillStyle = "#555555";
+          context.fill();
+          context.restore();
+          return;
+        }
+
+        const baseSize = node.isBridge ? BRIDGE_SIZE : IMAGE_SIZE;
+        const radius = compact
+          ? 6 / transform.k
+          : (baseSize * mediaScale * (node.ambientScale || 1)) / 2 + 7 / transform.k;
+
+        context.save();
+        context.beginPath();
+        context.arc(node.x, node.y, radius, 0, Math.PI * 2);
+        context.strokeStyle = node.color;
+        context.lineWidth = (compact ? 2 : 1.8) / transform.k;
+        context.stroke();
+
+        context.restore();
+      };
+
+      const miniMembers = isMini && currentGroup
+        ? nodes.filter((node) => node.constellations.includes(currentGroup)) : [];
+      const miniMemberIds = new Set(miniMembers.map((node) => node.id));
+      const focusedGroupNames = interactiveMini ? focusedNode?.constellations || [] : [];
+      const miniRegionNames = interactiveMini ? focusedGroupNames : currentGroup ? [currentGroup] : [];
+      const miniHitContext = isMini ? document.createElement("canvas").getContext("2d") : null;
+      let miniOverviewHovered = false;
+      let miniRegionScale = NaN;
+      let miniGroupRegions = [];
+      let hoveredMiniRegions = [];
+      let emphasisedMiniGroup = null;
+      const getMiniGroupRegions = () => {
+        if (miniRegionScale !== transform.k) {
+          miniGroupRegions = buildMiniGroupRegions(nodes, miniRegionNames, transform.k);
+          miniRegionScale = transform.k;
+        }
+        return miniGroupRegions;
+      };
+      const findMiniRegions = (event) => miniRegionsAtPoint(
+        getMiniGroupRegions(), transform.invert(d3.pointer(event, canvas)), miniHitContext);
+      const setMiniHover = (regions) => {
+        if (regions.map((region) => region.name).join("\u0000") ===
+            hoveredMiniRegions.map((region) => region.name).join("\u0000")) return;
+        hoveredMiniRegions = regions;
+        root.dispatchEvent(new CustomEvent("atlas-mini-target-change", {
+          bubbles: true,
+          detail: {
+            targets: regions.length ? regions.map((region) => ({
+              label: region.name, href: `/atlas/${encodeURIComponent(region.name)}/`,
+              color: groupColors.get(region.name),
+            })) : [],
+          },
+        }));
+        scheduleDraw();
+      };
+      if (isMini && currentGroup && !interactiveMini) {
+        root.addEventListener("pointermove", (event) => {
+          const active = findMiniRegions(event).length > 0;
+          if (active === miniOverviewHovered) return;
+          miniOverviewHovered = active;
+          scheduleDraw();
+        });
+        root.addEventListener("pointerleave", () => {
+          miniOverviewHovered = false;
+          scheduleDraw();
+        });
+      }
+      const traceMiniRegion = (region) => {
+        if (region.path) return region.path;
+        context.beginPath();
+        miniContourLine.context(context)(region.hull);
+        miniContourLine.context(null);
+        return undefined;
+      };
+      if (interactiveMini) {
+        const miniFrame = root.closest("[data-fragment-atlas-mini]");
+        miniFrame?.addEventListener("pointerleave", () => {
+          emphasisedMiniGroup = null;
+          setMiniHover([]);
+          scheduleDraw();
+        });
+        const emphasiseMiniLink = (event) => {
+          if (event.target === miniFrame) setMiniHover([]);
+          const link = event.target.closest?.("a[data-mini-group]");
+          const nextGroup = link?.dataset.miniGroup || null;
+          if (nextGroup === emphasisedMiniGroup) return;
+          emphasisedMiniGroup = nextGroup;
+          scheduleDraw();
+        };
+        miniFrame?.addEventListener("pointerover", emphasiseMiniLink);
+        miniFrame?.addEventListener("focusin", emphasiseMiniLink);
+        miniFrame?.addEventListener("focusout", (event) => {
+          if (event.relatedTarget?.closest?.("a[data-mini-group]")) return;
+          emphasisedMiniGroup = null;
+          scheduleDraw();
+        });
+      }
+
+      const draw = (time = performance.now()) => {
+        const stage = zoomStage();
+        updateNodeMotion(stage, time);
+        const connectedIds = connectedIdsFor(hoveredNode);
+
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, width, height);
+
+        context.save();
+        context.translate(transform.x, transform.y);
+        context.scale(transform.k, transform.k);
+
+        if (isMini) {
+          if (interactiveMini) {
+            getMiniGroupRegions().forEach((region) => {
+              const active = emphasisedMiniGroup
+                ? emphasisedMiniGroup === region.name
+                : hoveredMiniRegions.some((item) => item.name === region.name);
+              const dimmed = emphasisedMiniGroup && emphasisedMiniGroup !== region.name;
+              const path = traceMiniRegion(region);
+              context.lineJoin = "round";
+              context.lineCap = "round";
+              context.fillStyle = groupColors.get(region.name) || MINI_NEUTRAL_COLOR;
+              context.globalAlpha = dimmed ? 0.004 : active ? MINI_FILL_HOVER : MINI_FILL_IDLE;
+              if (path) context.fill(path); else context.fill();
+              context.strokeStyle = groupColors.get(region.name) || MINI_NEUTRAL_COLOR;
+              context.globalAlpha = dimmed ? 0.1 : active ? MINI_OUTLINE_HOVER : MINI_OUTLINE_IDLE;
+              context.lineWidth = (active ? 1.2 : 0.7) / transform.k;
+              if (path) context.stroke(path); else context.stroke();
+            });
+          }
+          // Highlight the actual home-atlas positions of every member, including
+          // shared fragments between groups. The local grid is never used here.
+          const groupColor = groupColors.get(currentGroup) || MINI_NEUTRAL_COLOR;
+          const currentMiniRegion = currentGroup ? getMiniGroupRegions()[0] : null;
+          if (currentMiniRegion) {
+            const path = traceMiniRegion(currentMiniRegion);
+            context.lineJoin = "round";
+            context.lineCap = "round";
+            context.fillStyle = groupColor;
+            context.globalAlpha = miniOverviewHovered ? MINI_FILL_HOVER : MINI_FILL_IDLE;
+            if (path) context.fill(path); else context.fill();
+            context.globalAlpha = miniOverviewHovered ? MINI_OUTLINE_HOVER : MINI_OUTLINE_IDLE;
+            context.strokeStyle = groupColor;
+            context.lineWidth = (miniOverviewHovered ? 1.2 : 0.7) / transform.k;
+            if (path) context.stroke(path); else context.stroke();
+          }
+          nodes.forEach((node) => {
+            if (miniMemberIds.has(node.id)) return;
+            const names = interactiveMini
+              ? node.constellations.filter((name) => focusedGroupNames.includes(name)) : [];
+            const radius = (currentGroup ? 1.25 : 1.8) / transform.k;
+            context.globalAlpha = emphasisedMiniGroup && !names.includes(emphasisedMiniGroup)
+              ? 0.25 : names.length ? 1 : currentGroup ? 0.5 : 0.65;
+            if (names.length) {
+              names.forEach((name, index) => {
+                context.beginPath();
+                context.moveTo(node.baseX, node.baseY);
+                context.arc(node.baseX, node.baseY, radius,
+                  -Math.PI / 2 + index * Math.PI * 2 / names.length,
+                  -Math.PI / 2 + (index + 1) * Math.PI * 2 / names.length);
+                context.closePath();
+                context.fillStyle = groupColors.get(name) || MINI_NEUTRAL_COLOR;
+                context.fill();
+              });
+            } else {
+              context.beginPath();
+              context.arc(node.baseX, node.baseY, radius, 0, Math.PI * 2);
+              context.fillStyle = MINI_NEUTRAL_COLOR;
+              context.fill();
+            }
+          });
+          miniMembers.forEach((node) => {
+            context.beginPath();
+            context.arc(node.baseX, node.baseY, 1.7 / transform.k, 0, Math.PI * 2);
+            context.fillStyle = groupColor;
+            context.globalAlpha = 0.95;
+            context.fill();
+          });
+          context.globalAlpha = 1;
+          drawFocusMarker(focusedNode, true);
+          context.restore();
+          return;
+        }
+
+        // In a constellation page, every membership is visible as a faint
+        // line. A hovered fragment or group brings its own connections forward.
+        const membershipSources = isGroup ? nodes : hoveredNode ? [hoveredNode] : [];
+        membershipSources.forEach((node) => {
+          node.constellations.forEach((name) => {
+            if (!visibleGroupNames.includes(name)) return;
+            const label = labelPositionFor(name);
+            const active = hoveredNode === node ||
+              (hoveredGroup === name && node.constellations.includes(name));
+            context.beginPath();
+            context.moveTo(node.x, node.y);
+            context.lineTo(label.x, label.y);
+            context.strokeStyle = groupColors.get(name);
+            context.globalAlpha = isGroup
+              ? active ? 0.62 : hoveredNode || hoveredGroup ? 0.025 : 0.085
+              : 0.28;
+            context.lineWidth = (active ? 1.25 : 0.7) / transform.k;
+            if (!isGroup) context.setLineDash([3 / transform.k, 5 / transform.k]);
+            context.stroke();
+          });
+        });
+        context.setLineDash([]);
+        context.globalAlpha = 1;
+
+        // Follow paths remain available even in the zoomed-out overview.
+        activeLinksFor(hoveredNode).forEach((link) => {
+          const middleX = (link.source.x + link.target.x) / 2;
+          const middleY = (link.source.y + link.target.y) / 2 - 18;
+          context.beginPath();
+          context.moveTo(link.source.x, link.source.y);
+          context.quadraticCurveTo(
+            middleX,
+            middleY,
+            link.target.x,
+            link.target.y,
+          );
+          context.strokeStyle =
+            link.source.color;
+          context.globalAlpha = 0.55;
+          context.lineWidth = 1.5 / transform.k;
+          context.stroke();
+        });
+        context.globalAlpha = 1;
+
+        const margin = Math.max(90, IMAGE_SIZE * mediaScale * transform.k * 2);
+        const topLeft = transform.invert([-margin, -margin]);
+        const bottomRight = transform.invert([width + margin, height + margin]);
+        const visibleNodes = nodes.filter((node) =>
+          node.x >= topLeft[0] && node.x <= bottomRight[0] &&
+          node.y >= topLeft[1] && node.y <= bottomRight[1]);
+        queueVisiblePreviews(visibleNodes);
+        const isEmphasised = (node) => connectedIds.has(node.id) ||
+          (hoveredGroup && node.constellations.includes(hoveredGroup));
+        visibleNodes
+          .filter((node) => !isEmphasised(node))
+          .forEach((node) => drawNode(node, stage, connectedIds));
+        visibleNodes
+          .filter(isEmphasised)
+          .forEach((node) => drawNode(node, stage, connectedIds));
+
+        // Titles remain visible in the overview, so shared memberships can
+        // be read without first zooming in.
+        {
+          const groupScreenFontSize = stage >= 2 ? 23 : 16;
+          const groupFontSize = groupScreenFontSize / transform.k;
+          if (isGroup) {
+            const labelSize = `${groupScreenFontSize}px`;
+            if (document.documentElement.style.getPropertyValue("--foe-group-label-size") !== labelSize) {
+              document.documentElement.style.setProperty("--foe-group-label-size", labelSize);
+            }
+          }
+          context.font = `400 ${groupFontSize}px ${UI_FONT}`;
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          context.lineJoin = "round";
+          context.lineWidth = 8 / transform.k;
+          visibleGroupNames.forEach((name) => {
+            const labelPosition = labelPositionFor(name);
+            context.strokeStyle = "rgba(255, 255, 255, 0.96)";
+            context.strokeText(name, labelPosition.x, labelPosition.y);
+            const active = hoveredGroup === name ||
+              hoveredNode?.constellations.includes(name);
+            context.fillStyle = active ? groupColors.get(name) : "#171717";
+            context.globalAlpha = (hoveredNode && !active) ||
+              (hoveredGroup && name !== hoveredGroup) ? 0.25 : 1;
+            context.fillText(name, labelPosition.x, labelPosition.y);
+            context.globalAlpha = 1;
+          });
+        }
+        drawFocusMarker(focusedNode);
+        context.restore();
+      };
+
+      // Queue only previews near the viewport, at most six decodes at once.
+      // If a new fragment has no generated preview yet, try its original image.
+      const previewQueue = [];
+      let activePreviewLoads = 0;
+      const pumpPreviewQueue = () => {
+        if (!root.isConnected) { previewQueue.length = 0; return; }
+        while (activePreviewLoads < 6 && previewQueue.length) {
+          const node = previewQueue.shift();
+          const image = new Image();
+          image.decoding = "async";
+          let triedOriginal = false;
+          activePreviewLoads += 1;
+          const complete = () => {
+            image.onload = null;
+            image.onerror = null;
+            activePreviewLoads -= 1;
+            scheduleDraw();
+            queueMicrotask(pumpPreviewQueue);
+          };
+          image.onload = complete;
+          image.onerror = () => {
+            if (!triedOriginal && node.originalImage && node.originalImage !== node.thumbnail) {
+              triedOriginal = true;
+              image.src = node.originalImage;
+              return;
+            }
+            complete();
+          };
+          node.imageElement = image;
+          image.src = node.thumbnail;
+        }
+      };
+      const queueVisiblePreviews = (visibleNodes) => {
+        if (isMini) return;
+        visibleNodes.forEach((node) => {
+          if (!node.thumbnail || node.previewRequested) return;
+          node.previewRequested = true;
+          previewQueue.push(node);
+        });
+        pumpPreviewQueue();
+      };
+
+      const findNode = (event) => {
+        const pointer = d3.pointer(event, canvas);
+        const [worldX, worldY] = transform.invert(pointer);
+
+        let match = null;
+        let bestDistance = Infinity;
+        const stage = zoomStage();
+        const connectedIds = connectedIdsFor(hoveredNode);
+        const padding = 2 / transform.k;
+        nodes.forEach((node) => {
+          const bounds = visualBoundsFor(node, stage, connectedIds);
+          const distance = Math.hypot(node.x - worldX, node.y - worldY);
+          if (Math.abs(node.x - worldX) <= bounds.width / 2 + padding &&
+              Math.abs(node.y - worldY) <= bounds.height / 2 + padding &&
+              distance < bestDistance) {
+            bestDistance = distance;
+            match = node;
+          }
+        });
+        return match;
+      };
+
+      const findGroup = (event) => {
+        const pointer = d3.pointer(event, canvas);
+        const [worldX, worldY] = transform.invert(pointer);
+
+        return (
+          visibleGroupNames.find((name) => {
+            const position = labelPositionFor(name);
+            const halfWidth = groupHitHalfWidth(name) / transform.k;
+            return (
+              Math.abs(worldX - position.x) <= halfWidth &&
+              Math.abs(worldY - position.y) <= groupHitHalfHeight() / transform.k
+            );
+          }) || null
+        );
+      };
+
+      canvas.addEventListener("pointermove", (event) => {
+        if (isMini) {
+          if (interactiveMini) setMiniHover(findMiniRegions(event));
+          return;
+        }
+        const nextGroup = findGroup(event);
+        const nextHovered = nextGroup ? null : findNode(event);
+        if (nextHovered === hoveredNode && nextGroup === hoveredGroup) return;
+        hoveredNode = nextHovered;
+        if (nextGroup !== hoveredGroup) {
+          hoveredGroup = nextGroup;
+        }
+        canvas.classList.toggle(
+          "has-hovered-item",
+          Boolean(hoveredNode || hoveredGroup),
+        );
+        scheduleDraw();
+      });
+
+      canvas.addEventListener("pointerleave", () => {
+        if (isMini) return;
+        hoveredNode = null;
+        if (hoveredGroup) {
+          hoveredGroup = null;
+        }
+        canvas.classList.remove("has-hovered-item");
+        scheduleDraw();
+      });
+
+      let pointerStart = null;
+      let dragged = false;
+
+      canvas.addEventListener("pointerdown", (event) => {
+        if (isMini) {
+          if (interactiveMini) setMiniHover(findMiniRegions(event));
+          return;
+        }
+        pointerStart = [event.clientX, event.clientY];
+        dragged = false;
+      });
+
+      canvas.addEventListener("pointerup", (event) => {
+        if (!pointerStart) return;
+        dragged =
+          Math.hypot(
+            event.clientX - pointerStart[0],
+            event.clientY - pointerStart[1],
+          ) > 5;
+        pointerStart = null;
+      });
+
+      canvas.addEventListener("click", (event) => {
+        if (isMini) {
+          if (!interactiveMini) return;
+          const regions = findMiniRegions(event);
+          setMiniHover(regions);
+          const href = regions.length
+            ? `/atlas/${encodeURIComponent(regions[0].name)}/` : miniAtlasPath;
+          if (event.ctrlKey || event.metaKey || event.shiftKey) window.open(href, "_blank", "noopener");
+          else navigateWithFade(href);
+          return;
+        }
+        if (dragged) return;
+        const group = findGroup(event);
+        if (group) {
+          navigateWithFade(`/atlas/${encodeURIComponent(group)}/`);
+          return;
+        }
+        const node = findNode(event);
+        if (node) {
+          navigateWithFade(`/fragments/${encodeURIComponent(node.id)}/`);
+          return;
+        }
+
+      });
+
+      let zoomButtonAction = false;
+      let isNavigatingToFragment = false;
+
+      const zoomFocusPoint = (sourceEvent) => {
+        const touches = sourceEvent?.touches;
+        if (touches?.length) {
+          const bounds = canvas.getBoundingClientRect();
+          let x = 0;
+          let y = 0;
+          for (const touch of touches) {
+            x += touch.clientX;
+            y += touch.clientY;
+          }
+          return [x / touches.length - bounds.left, y / touches.length - bounds.top];
+        }
+        if (Number.isFinite(sourceEvent?.clientX) && Number.isFinite(sourceEvent?.clientY)) {
+          return d3.pointer(sourceEvent, canvas);
+        }
+        return [width / 2, height / 2];
+      };
+
+      const openNearestFragment = (focusPoint) => {
+        if (isMini || isNavigatingToFragment) return;
+        let nearest = null;
+        let nearestDistance = Infinity;
+        const stage = zoomStage();
+        const connectedIds = connectedIdsFor(hoveredNode);
+        for (const node of nodes) {
+          const [screenX, screenY] = transform.apply([node.x, node.y]);
+          const bounds = visualBoundsFor(node, stage, connectedIds);
+          const halfWidth = bounds.width * transform.k / 2;
+          const halfHeight = bounds.height * transform.k / 2;
+          // Only consider fragments visible in the current viewport.
+          if (
+            screenX + halfWidth < 0 || screenX - halfWidth > width ||
+            screenY + halfHeight < 0 || screenY - halfHeight > height
+          ) continue;
+          const distance = Math.hypot(screenX - focusPoint[0], screenY - focusPoint[1]);
+          if (distance < nearestDistance) {
+            nearest = node;
+            nearestDistance = distance;
+          }
+        }
+        if (!nearest) return;
+        isNavigatingToFragment = true;
+        navigateWithFade(`/fragments/${encodeURIComponent(nearest.id)}/`);
+      };
+
+      const zoom = d3
+        .zoom()
+        .filter((event) => !isMini && (!event.ctrlKey || event.type === "wheel") && !event.button)
+        .on("start", (event) => {
+          if (event.sourceEvent) {
+            hasExplored = true;
+            if (hoveredGroup) {
+              hoveredGroup = null;
+              hoveredNode = null;
+            }
+          }
+        })
+        .on("zoom", (event) => {
+          const previousScale = transform.k;
+          transform = event.transform;
+          scheduleDraw();
+          ensureMotion();
+
+          const maximumScale = overviewScale * 14;
+          const userZoom = zoomButtonAction || Boolean(event.sourceEvent);
+          if (
+            userZoom && transform.k > previousScale &&
+            transform.k >= maximumScale * (1 - 0.000001)
+          ) {
+            openNearestFragment(zoomFocusPoint(event.sourceEvent));
+          }
+        });
+
+      const canvasSelection = d3.select(canvas);
+      canvasSelection.call(zoom).on("dblclick.zoom", null);
+
+      const overviewTransform = () => {
+        const layoutWidth = layoutBounds.maxX - layoutBounds.minX;
+        const layoutHeight = layoutBounds.maxY - layoutBounds.minY;
+        const centerX = (layoutBounds.minX + layoutBounds.maxX) / 2;
+        const centerY = (layoutBounds.minY + layoutBounds.maxY) / 2;
+        const scale = Math.min(width / layoutWidth, height / layoutHeight) * 0.96;
+        overviewScale = scale;
+
+        return d3.zoomIdentity
+          .translate(width / 2, height / 2)
+          .scale(scale)
+          .translate(-centerX, -centerY);
+      };
+
+      const focusedTransform = (node) => {
+        const scale = Math.min(overviewScale * 3.15, overviewScale * 14);
+        return d3.zoomIdentity
+          .translate(width / 2, height / 2)
+          .scale(scale)
+          .translate(-(node.baseX ?? node.x), -(node.baseY ?? node.y));
+      };
+
+      const changeZoom = (factor) => {
+        if (hoveredGroup) {
+          hoveredGroup = null;
+          hoveredNode = null;
+        }
+        hasExplored = true;
+        zoomButtonAction = true;
+        try {
+          canvasSelection
+            .interrupt()
+            .call(zoom.scaleBy, factor, [width / 2, height / 2]);
+        } finally {
+          zoomButtonAction = false;
+        }
+        // Allow a deliberate + press after panning at maximum zoom.
+        if (factor > 1 && transform.k >= overviewScale * 14 * (1 - 0.000001)) {
+          openNearestFragment([width / 2, height / 2]);
+        }
+      };
+
+      root.querySelector("[data-zoom-in]")?.addEventListener("click", () => {
+        changeZoom(1.45);
+      });
+
+      root.querySelector("[data-zoom-out]")?.addEventListener("click", () => {
+        changeZoom(1 / 1.45);
+      });
+
+      const resize = () => {
+        const bounds = root.getBoundingClientRect();
+        const nextWidth = Math.max(1, Math.round(bounds.width));
+        const nextHeight = Math.max(1, Math.round(bounds.height));
+        const nextPixelRatio = Math.min(window.devicePixelRatio || 1, isMini ? 2 : 1.5);
+        if (width === nextWidth && height === nextHeight && pixelRatio === nextPixelRatio &&
+            canvas.width === Math.round(nextWidth * nextPixelRatio) &&
+            canvas.height === Math.round(nextHeight * nextPixelRatio)) return;
+        width = nextWidth;
+        height = nextHeight;
+        pixelRatio = nextPixelRatio;
+        canvas.width = Math.round(width * pixelRatio);
+        canvas.height = Math.round(height * pixelRatio);
+
+        const nextOverview = overviewTransform();
+        zoom
+          .extent([
+            [0, 0],
+            [width, height],
+          ])
+          .translateExtent([
+            [layoutBounds.minX, layoutBounds.minY],
+            [layoutBounds.maxX, layoutBounds.maxY],
+          ])
+          .scaleExtent([overviewScale, overviewScale * 14]);
+
+        if (isMini) {
+          canvasSelection.call(zoom.transform, nextOverview);
+        } else if (focusedNode && !hasAppliedInitialFocus) {
+          hasAppliedInitialFocus = true;
+          hasExplored = true;
+          canvasSelection.call(zoom.transform, focusedTransform(focusedNode));
+        } else if (!hasExplored || transform.k < overviewScale) {
+          canvasSelection.call(zoom.transform, nextOverview);
+        }
+        scheduleDraw();
+        ensureMotion();
+      };
+
+      // Canvas pixels and cached text sprites must be redrawn after the
+      // webfont loads; CSS alone cannot update text already painted on Canvas.
+      if (document.fonts) {
+        Promise.all([
+          document.fonts.load('400 16px "PT Sans"'),
+          document.fonts.load('700 16px "PT Sans"'),
+          document.fonts.load('400 16px "PT Sans Enlarged"'),
+          document.fonts.load('700 16px "PT Sans Enlarged"'),
+          document.fonts.load('400 16px "HY QiHei X3 Web"', "片段记忆"),
+          document.fonts.load('700 16px "HY QiHei X3 Web"', "片段记忆"),
+        ]).then(() => {
+          if (!root.isConnected) return;
+          iconCache.clear();
+          textWrapCache.clear();
+          scheduleDraw();
+        }).catch((error) => {
+          console.warn("Could not load the website fonts:", error);
+        });
+      }
+
+      new ResizeObserver(resize).observe(root);
+      resize();
+      root.dataset.atlasReady = "true";
+    });
+  }
+
+  initialiseAtlases();
+  document.addEventListener("astro:page-load", initialiseAtlases);
+</script>
+
+<style>
+  .constellation-atlas {
+    position: relative;
+    width: 100%;
+    height: 100svh;
+    min-height: 560px;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .constellation-atlas.is-mini {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .constellation-atlas.is-mini .atlas-canvas {
+    pointer-events: none;
+  }
+
+  .constellation-atlas.is-mini[data-mini-group-links="true"] .atlas-canvas {
+    pointer-events: auto;
+    touch-action: auto;
+    cursor: pointer;
+  }
+
+  .atlas-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .atlas-canvas:active {
+    cursor: grabbing;
+  }
+
+  .atlas-canvas.has-hovered-item {
+    cursor: pointer;
+  }
+
+  .atlas-zoom-controls {
+    position: fixed;
+    right: 14px;
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    width: 36px;
+    overflow: hidden;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fff;
+    pointer-events: auto;
+  }
+
+  .atlas-zoom-controls button {
+    appearance: none;
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: #fff;
+    color: #111;
+    font: 18px/1 "PT Sans Enlarged", Arial, sans-serif;
+    cursor: pointer;
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+
+  .atlas-zoom-controls button + button {
+    border-top: 1px solid #ddd;
+  }
+
+  .atlas-zoom-controls button:hover {
+    background: #f5f5f5;
+  }
+
+  .atlas-zoom-controls button:focus-visible {
+    outline: 1px solid #777;
+    outline-offset: -3px;
+  }
+</style>

@@ -1,0 +1,576 @@
+---
+import fragmentsSource from "../data/fragments.json";
+
+type Fragment = {
+  id: string;
+  type: "image" | "video" | "audio" | "text";
+  image?: string;
+  poster?: string;
+  alt?: string;
+  description?: string;
+  title?: string;
+  titleEn?: string;
+};
+
+const fragments = fragmentsSource as Fragment[];
+const labelFor = (fragment: Fragment) =>
+  fragment.type === "text"
+    ? fragment.titleEn || fragment.title || "Text fragment"
+    : fragment.alt || fragment.description || fragment.title || `${fragment.type} fragment`;
+
+const paperMarksFor = (id: string) => {
+  const seed = Array.from(id).reduce((total, character) => total + character.charCodeAt(0), 0);
+  return Array.from({ length: 18 }, (_, index) => {
+    const first = Math.sin((seed + index * 17.13) * 12.9898) * 43758.5453;
+    const second = Math.sin((seed + index * 31.71) * 7.233) * 19423.115;
+    const third = Math.sin((seed + index * 47.29) * 3.177) * 9271.417;
+    const x = (first - Math.floor(first)) * 26 - 15;
+    const y = (second - Math.floor(second)) * 38 - 20;
+    const length = 1.5 + (third - Math.floor(third)) * 3.5;
+    return { x, y, endX: x + length, endY: y + length * 0.18 };
+  });
+};
+
+interface Props { currentId?: string; }
+const { currentId = "" } = Astro.props;
+---
+
+<section class="fragment-path-preview" data-fragment-path-preview data-current-id={currentId} aria-label="Browsing path preview">
+  <a class="pp-trigger" href="/path/" aria-expanded="false" aria-controls="fragment-path-panel" data-pp-trigger>path</a>
+  <div class="pp-panel" id="fragment-path-panel" role="region" aria-label="Your browsing path" aria-hidden="true" inert data-pp-panel>
+    <a class="pp-expand" href="/path/" aria-label="Open the full path page" data-path-expand>
+      <span>path</span><span aria-hidden="true">▲</span>
+    </a>
+    <button class="pp-scroll pp-scroll-left" type="button" aria-label="Scroll path left" aria-controls="fragment-path-list" aria-disabled="true" data-pp-scroll-left>
+      <svg viewBox="0 0 16 13" aria-hidden="true"><path d="M14 0 L2 6.5 L14 13 Z" fill="currentColor" /></svg>
+    </button>
+    <ol class="pp-list" id="fragment-path-list" aria-label="Fragments in visit order" data-pp-list></ol>
+    <button class="pp-scroll pp-scroll-right" type="button" aria-label="Scroll path right" aria-controls="fragment-path-list" aria-disabled="true" data-pp-scroll-right>
+      <svg viewBox="0 0 16 13" aria-hidden="true"><path d="M2 0 L14 6.5 L2 13 Z" fill="currentColor" /></svg>
+    </button>
+    <p class="pp-empty" data-pp-empty hidden>no fragments visited yet</p>
+  </div>
+      {fragments.map((fragment) => (
+        <template data-pp-template={fragment.id}>
+          <li class="pp-item">
+            <a class="pp-fragment" href={`/fragments/${encodeURIComponent(fragment.id)}/`} aria-label={labelFor(fragment)}>
+              <span class="pp-media" data-pp-media data-media-kind={fragment.type}>
+                {fragment.type === "image" || fragment.type === "video" ? (
+                  <>
+                    <img class="pp-preview" src={`/thumbnails-proportional/${fragment.id}.webp`} data-original-src={fragment.type === "image" ? fragment.image : fragment.poster} alt={labelFor(fragment)} loading="lazy" decoding="async" />
+                    <svg class="pp-media-fallback" viewBox="0 0 46 34" aria-hidden="true">
+                      <rect x="0.5" y="0.5" width="45" height="33" fill="#f2f2ef" stroke="#c7c7c2" />
+                      {fragment.type === "video" ? (
+                        <path d="M18 9 L31 17 L18 25 Z" fill="#777770" />
+                      ) : (
+                        <>
+                          <circle cx="33" cy="10" r="3" fill="#b8b8af" />
+                          <path d="M4 29 L15 14 L25 25 L32 19 L42 29 Z" fill="#b8b8af" />
+                        </>
+                      )}
+                    </svg>
+                    {fragment.type === "video" && (
+                      <svg class="pp-video-marker" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2 L13 8 L4 14 Z" fill="none" stroke="white" stroke-width="1.4" stroke-linejoin="round" /></svg>
+                    )}
+                  </>
+                ) : fragment.type === "audio" ? (
+                  <svg class="pp-audio-icon" viewBox="-25 -17 50 34" aria-hidden="true">
+                    <path d="M-21.5 -17 H21.5 L25 -13.5 V17 H-25 V-13.5 Z" fill="#f1f1ec" stroke="#bcbcb5" stroke-width=".55" />
+                    <rect x="-22" y="-13" width="44" height="17" fill="#deded8" fill-opacity=".38" />
+                    <rect x="-7.5" y="-8" width="15" height="10.5" fill="#f8f8f4" />
+                    <rect x="-5.2" y="-7.1" width="4.4" height="8.7" fill="#3d3832" fill-opacity=".72" />
+                    <rect x="1.1" y="-7.1" width="4.1" height="8.7" fill="#fffffc" />
+                    {[-13, 13].map((reelX) => (
+                      <g transform={`translate(${reelX} -2.5)`}>
+                        <circle r="5.6" fill="#fffffb" stroke="#b9b8ae" stroke-width=".5" />
+                        <circle r="2.2" fill="#c1c1b9" fill-opacity=".58" />
+                        {Array.from({ length: 6 }, (_, index) => {
+                          const angle = index * Math.PI / 3;
+                          return <line x1={Math.cos(angle) * 3} y1={Math.sin(angle) * 3} x2={Math.cos(angle) * 4.5} y2={Math.sin(angle) * 4.5} stroke="#b6b4a9" stroke-width=".7" />;
+                        })}
+                      </g>
+                    ))}
+                    <path d="M-17 5 H17 L20 17 H-20 Z" fill="#e2e1da" fill-opacity=".72" />
+                    {[-12, -4, 4, 12].map((x, index) => <circle cx={x} cy="12.2" r={index === 0 || index === 3 ? 1.8 : 1.3} fill="#7d796f" fill-opacity=".34" />)}
+                    {[[-21.8, -14], [21.8, -14], [-21.8, 14], [21.8, 14], [0, 7.5]].map(([x, y]) => (
+                      <g><circle cx={x} cy={y} r="1.05" fill="#5c5850" fill-opacity=".48" /><line x1={x - .65} y1={y} x2={x + .65} y2={y} stroke="#fafaf7" stroke-width=".35" /></g>
+                    ))}
+                  </svg>
+                ) : (
+                  <svg class="pp-text-icon" viewBox="-18 -23 36 46" aria-hidden="true">
+                    <path d="M-18 -22.65 L-15 -22.45 L-12 -22.85 L-9 -22.45 L-6 -22.85 L-3 -22.45 L0 -22.85 L3 -22.45 L6 -22.85 L9 -22.45 L12 -22.85 L15 -22.45 L18 -22.85 V16.125 Q18 21.9 12.5 23 H-18 Z" fill="#f0ecdf" />
+                    {paperMarksFor(fragment.id).map((mark) => <line x1={mark.x} y1={mark.y} x2={mark.endX} y2={mark.endY} stroke="#66583e" stroke-opacity=".12" stroke-width=".35" />)}
+                    <path d="M-16.5 -.46 Q0 .19 16.5 -.36" fill="none" stroke="#6b5b42" stroke-opacity=".14" stroke-width=".55" />
+                    <path d="M18 16.125 Q16.625 21.075 12.5 23 L14.04 19.15 Z" fill="#cdc3b0" />
+                  </svg>
+                )}
+                <span class="pp-caption">{labelFor(fragment)}</span>
+              </span>
+            </a>
+          </li>
+        </template>
+      ))}
+</section>
+<div class="pp-sheet" data-path-sheet role="dialog" aria-modal="true" aria-label="Your browsing path" aria-hidden="true" inert>
+  <iframe data-path-sheet-frame title="Your browsing path" tabindex="0"></iframe>
+</div>
+<div class="pp-transition" data-pp-transition aria-hidden="true"></div>
+
+<script>
+  function installPreviewFallback(image: HTMLImageElement, signal: AbortSignal) {
+    const media = image.closest<HTMLElement>("[data-media-kind]");
+    let triedOriginal = false;
+    const fallback = () => {
+      const original = image.dataset.originalSrc;
+      if (!triedOriginal && original && original !== image.getAttribute("src")) {
+        triedOriginal = true;
+        media?.classList.remove("is-missing");
+        image.src = original;
+        return;
+      }
+      media?.classList.add("is-missing");
+    };
+    image.addEventListener("error", fallback, { signal });
+    image.addEventListener("load", () => media?.classList.remove("is-missing"), { once: true, signal });
+    if (image.complete && !image.naturalWidth) fallback();
+  }
+
+  const PATH_KEY = "fragments-of-elsewhere:session-path";
+
+  function recordSessionVisit(id: string) {
+    if (!id) return;
+    let entries: unknown[] = [];
+    try {
+      const stored: unknown = JSON.parse(sessionStorage.getItem(PATH_KEY) || "[]");
+      if (Array.isArray(stored)) entries = stored;
+    } catch {}
+    const last = entries[entries.length - 1];
+    const lastId = typeof last === "string" ? last :
+      last && typeof last === "object" && "id" in last ? String(last.id) : "";
+    // Re-running setup or refreshing a fragment should not duplicate the last visit.
+    if (lastId === id) return;
+    entries.push({ id });
+    try { sessionStorage.setItem(PATH_KEY, JSON.stringify(entries)); } catch {}
+  }
+
+  let disposePreview: (() => void) | undefined;
+  let refreshPreview: (() => void) | undefined;
+  let activeRoot: HTMLElement | null = null;
+
+  function initialisePathPreview() {
+    const root = document.querySelector<HTMLElement>("[data-fragment-path-preview]");
+    if (root) recordSessionVisit(root.dataset.currentId || "");
+    if (root === activeRoot && root?.isConnected) {
+      refreshPreview?.();
+      return;
+    }
+    disposePreview?.();
+    activeRoot = root;
+    if (!root) return;
+
+    const trigger = root.querySelector<HTMLAnchorElement>("[data-pp-trigger]")!;
+    const panel = root.querySelector<HTMLElement>("[data-pp-panel]")!;
+    const list = root.querySelector<HTMLOListElement>("[data-pp-list]")!;
+    const scrollLeftButton = root.querySelector<HTMLButtonElement>("[data-pp-scroll-left]")!;
+    const scrollRightButton = root.querySelector<HTMLButtonElement>("[data-pp-scroll-right]")!;
+    const empty = root.querySelector<HTMLElement>("[data-pp-empty]")!;
+    const sheet = root.nextElementSibling as HTMLElement;
+    const frame = sheet.querySelector<HTMLIFrameElement>("[data-path-sheet-frame]")!;
+    const overlay = sheet.nextElementSibling as HTMLElement;
+    const abort = new AbortController();
+    const signal = abort.signal;
+    let sheetOpen = false;
+    let sheetTimer = 0;
+    let sheetLoadVersion = 0;
+    const previousBodyOverflow = document.body.style.overflow;
+    const returnUrl = window.location.href;
+    const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const duration = () => reducedMotion() ? 0 : 560;
+
+    function hideSheet() {
+      if (!sheetOpen) return;
+      sheetOpen = false;
+      ++sheetLoadVersion;
+      sheet.classList.remove("is-open");
+      sheet.setAttribute("aria-hidden", "true");
+      sheet.inert = true;
+      document.body.style.overflow = previousBodyOverflow;
+      window.clearTimeout(sheetTimer);
+      sheetTimer = window.setTimeout(() => {
+        if (sheetOpen) return;
+        trigger.focus({ preventScroll: true });
+        setOpen(false);
+      }, duration());
+    }
+    function closeSheet() {
+      if (!sheetOpen) return;
+      if (window.history.state?.foePathSheet) window.history.back();
+      else hideSheet();
+    }
+    function openSheet() {
+      if (sheetOpen) return;
+      sheetOpen = true;
+      window.clearTimeout(sheetTimer);
+      const version = ++sheetLoadVersion;
+      setOpen(false);
+      try { sessionStorage.setItem("fragments-of-elsewhere:path-return", returnUrl); } catch {}
+      frame.addEventListener("load", () => {
+        if (!sheetOpen || version !== sheetLoadVersion) return;
+        sheet.inert = false;
+        sheet.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden";
+        sheet.classList.add("is-open");
+        window.history.pushState({ ...window.history.state, foePathSheet: true }, "", "/path/");
+        frame.focus();
+      }, { once: true, signal });
+      frame.src = "/path/?sheet=1";
+    }
+    window.addEventListener("popstate", () => {
+      if (window.history.state?.foePathSheet && !sheetOpen) {
+        // Browser Forward restores the same panel without another history entry.
+        sheetOpen = true;
+        frame.src = "/path/?sheet=1";
+        sheet.inert = false;
+        sheet.setAttribute("aria-hidden", "false");
+        sheet.classList.add("is-open");
+        document.body.style.overflow = "hidden";
+      } else if (!window.history.state?.foePathSheet) hideSheet();
+    }, { signal });
+    window.addEventListener("message", event => {
+      if (event.origin !== window.location.origin || event.source !== frame.contentWindow || !sheetOpen) return;
+      if (event.data?.type === "foe:path-close") closeSheet();
+      if (event.data?.type === "foe:path-navigate" && typeof event.data.href === "string") {
+        const destination = new URL(event.data.href, window.location.origin);
+        if (destination.origin !== window.location.origin || !destination.pathname.startsWith("/fragments/")) return;
+        // Replace the sheet entry so Back returns directly to the prior fragment.
+        window.location.replace(destination.href);
+      }
+    }, { signal });
+    document.addEventListener("keydown", event => { if (sheetOpen && event.key === "Escape") closeSheet(); }, { signal });
+
+    const templates = new Map(Array.from(root.querySelectorAll<HTMLTemplateElement>("[data-pp-template]"),
+      template => [template.dataset.ppTemplate!, template] as const));
+    let closeTimer = 0;
+    let navigationTimer = 0;
+    let scrollFrame = 0;
+    let open = false;
+    let leaving = false;
+
+    const updateScrollButtons = () => {
+      const maximum = Math.max(0, list.scrollWidth - list.clientWidth);
+      const position = Math.max(0, Math.min(maximum, list.scrollLeft));
+      scrollLeftButton.setAttribute("aria-disabled", String(position <= 1));
+      scrollRightButton.setAttribute("aria-disabled", String(position >= maximum - 1));
+    };
+    const scrollPath = (direction: number) => {
+      window.clearTimeout(closeTimer);
+      const button = direction < 0 ? scrollLeftButton : scrollRightButton;
+      if (button.getAttribute("aria-disabled") === "true") return;
+      list.scrollBy({
+        left: direction * Math.max(120, Math.round(list.clientWidth * .8)),
+        behavior: reducedMotion() ? "auto" : "smooth",
+      });
+    };
+    scrollLeftButton.addEventListener("click", () => scrollPath(-1), { signal });
+    scrollRightButton.addEventListener("click", () => scrollPath(1), { signal });
+    list.addEventListener("scroll", updateScrollButtons, { passive: true, signal });
+    window.addEventListener("resize", updateScrollButtons, { signal });
+    const listObserver = typeof ResizeObserver === "function" ? new ResizeObserver(updateScrollButtons) : null;
+    listObserver?.observe(list);
+
+    const oldPathLinks = new Set<HTMLElement>();
+    const suppressOldPathLinks = () => {
+      if (!root.isConnected) return;
+      document.querySelectorAll<HTMLElement>('a[href], .path-link, .path-button, [data-pp-trigger]')
+        .forEach(link => {
+          if (root.contains(link)) return;
+          const label = (link.textContent || "").replace(/[◁◀◃▷▶▹▽▼▿△▲▵]/g, "").trim().toLowerCase();
+          const isPathLink = link instanceof HTMLAnchorElement &&
+            new URL(link.href).pathname.replace(/\/$/, "") === "/path";
+          if (label !== "path" || (!isPathLink && !link.matches('.path-link, .path-button, [data-pp-trigger]'))) return;
+          if (!link.classList.contains("pp-original-path")) {
+            oldPathLinks.add(link);
+            link.classList.add("pp-original-path");
+          }
+        });
+    };
+    suppressOldPathLinks();
+    let pathScanFrame = 0;
+    const pathLinkObserver = new MutationObserver(() => {
+      if (!pathScanFrame) pathScanFrame = requestAnimationFrame(() => {
+        pathScanFrame = 0;
+        suppressOldPathLinks();
+      });
+    });
+    pathLinkObserver.observe(document.body, { childList: true, characterData: true, subtree: true });
+    const controls = Array.from(document.querySelectorAll<HTMLElement>(
+      '[data-return], [data-drift], .return-button, .drift-button, .corner-bottom-left, .corner-bottom-right, a, button'
+    )).filter(control => {
+      if (root.contains(control)) return false;
+      const text = (control.textContent || "").toLowerCase().replace(/[^a-z]/g, "");
+      return control.matches('[data-return], [data-drift], .return-button, .drift-button') ||
+        text === "return" || text === "driftelsewhere";
+    });
+    const savedControls = controls.map(control => ({
+      control,
+      base: control.style.getPropertyValue("--pp-base-bottom"),
+      priority: control.style.getPropertyPriority("--pp-base-bottom"),
+      hadClass: control.classList.contains("pp-lift-control"),
+    }));
+    controls.forEach(control => {
+      const bottom = getComputedStyle(control).bottom;
+      control.style.setProperty("--pp-base-bottom", bottom === "auto" ? "22px" : bottom);
+      control.classList.add("pp-lift-control");
+    });
+    const oldHeight = document.body.style.getPropertyValue("--fragment-path-height");
+    const oldLift = document.body.style.getPropertyValue("--fragment-path-lift");
+    document.body.style.setProperty("--fragment-path-lift", "0px");
+
+    const mini = document.querySelector<HTMLElement>(
+      '[data-atlas-mode="mini"], [data-fragment-atlas-mini-map], .fragment-atlas-mini-map, .fragment-atlas-minimap, .atlas-mini-map, .atlas-minimap'
+    );
+    const measureHeight = () => {
+      const height = mini?.getBoundingClientRect().height || (window.innerWidth <= 600 ? 74 : 120);
+      document.body.style.setProperty("--fragment-path-height", `${height}px`);
+      if (open) document.body.style.setProperty("--fragment-path-lift", `${height}px`);
+    };
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measureHeight) : null;
+    if (mini) observer?.observe(mini);
+    window.addEventListener("resize", measureHeight, { signal });
+    measureHeight();
+
+    function renderPath() {
+      let entries: unknown[] = [];
+      try {
+        const stored: unknown = JSON.parse(sessionStorage.getItem(PATH_KEY) || "[]");
+        if (Array.isArray(stored)) entries = stored;
+      } catch { /* An unavailable history displays an empty preview. */ }
+      const content = document.createDocumentFragment();
+      entries.forEach(entry => {
+        const id = typeof entry === "string" ? entry :
+          entry && typeof entry === "object" && "id" in entry ? String(entry.id) : "";
+        const template = templates.get(id);
+        if (!template) return;
+        const item = template.content.cloneNode(true) as DocumentFragment;
+        if (id === root!.dataset.currentId) item.querySelector("a")?.setAttribute("aria-current", "page");
+        content.append(item);
+      });
+      list.replaceChildren(content);
+      empty.hidden = list.children.length !== 0;
+      list.querySelectorAll<HTMLImageElement>(".pp-preview").forEach(image => {
+        installPreviewFallback(image, signal);
+      });
+      cancelAnimationFrame(scrollFrame);
+      scrollFrame = requestAnimationFrame(() => {
+        list.scrollLeft = list.scrollWidth;
+        updateScrollButtons();
+      });
+    }
+
+    function setOpen(value: boolean) {
+      window.clearTimeout(closeTimer);
+      if (leaving) return;
+      if (value && !open) renderPath();
+      open = value;
+      root!.classList.toggle("is-open", open);
+      trigger.setAttribute("aria-expanded", String(open));
+      panel.setAttribute("aria-hidden", String(!open));
+      panel.inert = !open;
+      document.body.style.setProperty("--fragment-path-lift", open ? "var(--fragment-path-height)" : "0px");
+    }
+    const keepOpen = () => window.clearTimeout(closeTimer);
+    const scheduleClose = () => {
+      window.clearTimeout(closeTimer);
+      closeTimer = window.setTimeout(() => setOpen(false), 160);
+    };
+    root.addEventListener("pointerenter", event => {
+      if (event.pointerType !== "touch") setOpen(true);
+    }, { signal });
+    root.addEventListener("pointerleave", scheduleClose, { signal });
+    root.addEventListener("focusin", () => setOpen(true), { signal });
+    root.addEventListener("focusout", event => {
+      const next = event.relatedTarget as Node | null;
+      if (!next || !root!.contains(next)) scheduleClose();
+    }, { signal });
+    controls.forEach(control => {
+      control.addEventListener("pointerenter", keepOpen, { signal });
+      control.addEventListener("pointerleave", scheduleClose, { signal });
+      control.addEventListener("focusin", keepOpen, { signal });
+      control.addEventListener("focusout", scheduleClose, { signal });
+    });
+    trigger.addEventListener("pointerdown", event => {
+      if (event.pointerType === "touch") event.preventDefault();
+    }, { signal });
+    root.addEventListener("click", event => {
+      if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      const link = (event.target as Element).closest<HTMLAnchorElement>("a");
+      if (!link || !root!.contains(link)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (link === trigger) {
+        setOpen(true);
+        return;
+      }
+      if (link.matches("[data-path-expand]")) {
+        openSheet();
+        return;
+      }
+      if (leaving) return;
+      leaving = true;
+      window.clearTimeout(closeTimer);
+      const navigate = (window as Window & { elsewhereNavigate?: (href: string) => void }).elsewhereNavigate;
+      if (typeof navigate === "function") navigate(link.href);
+      else {
+        overlay.style.pointerEvents = "auto";
+        overlay.style.opacity = "1";
+        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        navigationTimer = window.setTimeout(() => window.location.assign(link.href), reduced ? 0 : 430);
+      }
+    }, { capture: true, signal });
+    list.addEventListener("wheel", event => {
+      if (list.scrollWidth > list.clientWidth && Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+        event.preventDefault();
+        list.scrollLeft += event.deltaY;
+      }
+    }, { passive: false, signal });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && open) {
+        setOpen(false);
+        if (panel.contains(document.activeElement)) {
+          trigger.focus({ preventScroll: true });
+          setOpen(false);
+        }
+      }
+    }, { signal });
+    document.addEventListener("pointerdown", event => {
+      if (open && !root!.contains(event.target as Node) && !controls.some(control => control.contains(event.target as Node))) setOpen(false);
+    }, { signal });
+    window.addEventListener("storage", event => {
+      if (open && event.storageArea === sessionStorage && (event.key === PATH_KEY || event.key === null)) renderPath();
+    }, { signal });
+    refreshPreview = () => {
+      leaving = false;
+      window.clearTimeout(navigationTimer);
+      overlay.style.opacity = "0";
+      overlay.style.pointerEvents = "none";
+      setOpen(false);
+    };
+    refreshPreview();
+    disposePreview = () => {
+      abort.abort();
+      ++sheetLoadVersion;
+      window.clearTimeout(sheetTimer);
+      document.body.style.overflow = previousBodyOverflow;
+      pathLinkObserver.disconnect();
+      cancelAnimationFrame(pathScanFrame);
+      observer?.disconnect();
+      listObserver?.disconnect();
+      window.clearTimeout(closeTimer);
+      window.clearTimeout(navigationTimer);
+      cancelAnimationFrame(scrollFrame);
+      oldPathLinks.forEach(link => link.classList.remove("pp-original-path"));
+      savedControls.forEach(({ control, base, priority, hadClass }) => {
+        if (!hadClass) control.classList.remove("pp-lift-control");
+        if (base) control.style.setProperty("--pp-base-bottom", base, priority);
+        else control.style.removeProperty("--pp-base-bottom");
+      });
+      if (oldHeight) document.body.style.setProperty("--fragment-path-height", oldHeight);
+      else document.body.style.removeProperty("--fragment-path-height");
+      if (oldLift) document.body.style.setProperty("--fragment-path-lift", oldLift);
+      else document.body.style.removeProperty("--fragment-path-lift");
+      refreshPreview = undefined;
+      activeRoot = null;
+    };
+  }
+  initialisePathPreview();
+  document.addEventListener("astro:page-load", initialisePathPreview);
+  document.addEventListener("astro:before-swap", () => { disposePreview?.(); disposePreview = undefined; });
+  window.addEventListener("pageshow", initialisePathPreview);
+</script>
+
+<style is:global>
+  .fragment-path-preview {
+    --pp-media-size: max(18px, calc(var(--fragment-path-height, 120px) - 54px));
+    position: fixed; bottom: 0; left: 0; width: 100%; height: 0;
+    z-index: 2000; color: #171717; pointer-events: none;
+    font-family: Verdana, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .pp-trigger {
+    position: absolute; bottom: max(22px, env(safe-area-inset-bottom, 0px)); left: 50%;
+    transform: translateX(-50%); font-size: 13px; line-height: 1.35;
+    text-decoration: none; color: inherit; pointer-events: auto; transition: opacity 180ms ease;
+  }
+  .fragment-path-preview.is-open .pp-trigger { opacity: 0; pointer-events: none; }
+  .pp-panel {
+    position: absolute; bottom: 0; left: 0; width: 100%; height: var(--fragment-path-height, 120px);
+    box-sizing: border-box; border-top: 1px solid #e5e5e5; background: #fff;
+    opacity: 0; visibility: hidden; transform: translateY(100%); pointer-events: none;
+    transition: transform 300ms ease, opacity 220ms ease, visibility 300ms;
+  }
+  .fragment-path-preview.is-open .pp-panel {
+    opacity: 1; visibility: visible; transform: translateY(0); pointer-events: auto;
+  }
+  .pp-expand {
+    position: absolute; top: 9px; left: 50%; transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 6px; width: auto; height: auto;
+    color: inherit; text-decoration: none; font-size: 17px; line-height: 1.35;
+  }
+  .pp-expand svg { display: block; width: 16px; height: 13px; }
+  .pp-scroll {
+    position: absolute; top: 42px; bottom: 10px; z-index: 1; width: 36px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    border: 0; background: transparent; color: inherit; cursor: pointer; transition: opacity 180ms ease;
+  }
+  .pp-scroll-left { left: 10px; }
+  .pp-scroll-right { right: 10px; }
+  .pp-scroll svg { display: block; width: 16px; height: 13px; }
+  .pp-scroll:hover { opacity: .6; }
+  .pp-scroll[aria-disabled="true"] { opacity: .22; cursor: default; }
+  .pp-list {
+    position: absolute; inset: 42px 54px 10px; display: flex; align-items: center;
+    gap: 24px; margin: 0; padding: 0 8px; list-style: none; overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none; overscroll-behavior-x: contain;
+  }
+  .pp-list::-webkit-scrollbar { display: none; }
+  .pp-item { display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .pp-fragment { display: flex; align-items: center; justify-content: center; min-width: 44px; text-decoration: none; color: inherit; }
+  .pp-media { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+  .pp-preview { display: block; width: auto; height: auto; max-width: var(--pp-media-size); max-height: var(--pp-media-size); }
+  .pp-audio-icon { display: block; width: var(--pp-media-size); height: auto; }
+  .pp-text-icon { display: block; width: auto; height: var(--pp-media-size); }
+  .pp-media-fallback { display: none; width: var(--pp-media-size); height: auto; }
+  .pp-media.is-missing .pp-preview, .pp-media.is-missing .pp-video-marker { display: none; }
+  .pp-media.is-missing .pp-media-fallback { display: block; }
+  .pp-video-marker { position: absolute; right: 4px; bottom: 4px; width: 12px; height: 12px; filter: drop-shadow(0 0 1px #444); }
+  .pp-caption { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 4px; box-sizing: border-box; opacity: 0; background: rgb(255 255 255 / .68); text-align: center; overflow: hidden; overflow-wrap: anywhere; font-size: 9px; line-height: 1.3; transition: opacity 180ms ease, background-color 180ms ease; }
+  .pp-media[data-media-kind="text"] .pp-caption,
+  .pp-media[data-media-kind="audio"] .pp-caption { opacity: 1; background: transparent; }
+  .pp-media[data-media-kind="text"] .pp-caption { padding: 12% 15%; color: #514b42; }
+  .pp-media[data-media-kind="audio"] .pp-caption { inset: 0; padding: 3px; color: #514b42; }
+  .pp-fragment:hover .pp-caption, .pp-fragment:focus-visible .pp-caption { opacity: 1; background: rgb(255 255 255 / .68); }
+  .pp-fragment[aria-current="page"] { outline: 1px solid #c4c4c0; outline-offset: 3px; }
+  .pp-trigger:focus-visible, .pp-expand:focus-visible, .pp-scroll:focus-visible, .pp-fragment:focus-visible { outline: 1px solid currentColor; outline-offset: 3px; }
+  .pp-empty { margin: 0; position: absolute; top: 50%; left: 0; right: 0; text-align: center; font-size: 12px; color: #777; }
+  .pp-empty[hidden] { display: none; }
+  /* Beat the shared directional button styles, even when loaded later. */
+  html body .pp-original-path,
+  html body#foe-fragment-page .pp-original-path { display: none !important; }
+  .pp-lift-control {
+    position: fixed !important;
+    bottom: calc(var(--pp-base-bottom, 22px) + var(--fragment-path-lift, 0px)) !important;
+    z-index: 2001 !important; transition: bottom 300ms ease;
+  }
+  .pp-sheet {
+    position: fixed; inset: 0; z-index: 10000; background: #fff;
+    transform: translateY(100%); visibility: hidden; pointer-events: none;
+    transition: transform 560ms cubic-bezier(.22, .72, .24, 1), visibility 560ms;
+  }
+  .pp-sheet.is-open { transform: translateY(0); visibility: visible; pointer-events: auto; }
+  .pp-sheet iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+  body#foe-fragment-page .pp-media[data-media-kind="text"] .pp-caption { font-size: 12px !important; line-height: 1.3 !important; }
+  body#foe-fragment-page .pp-media[data-media-kind="audio"] .pp-caption { font-size: 9px !important; line-height: 1.2 !important; }
+  .pp-transition { position: fixed; inset: 0; z-index: 9999; background: #fff; opacity: 0; pointer-events: none; transition: opacity 400ms ease; }
+  @media (prefers-reduced-motion: reduce) {
+    .pp-panel, .pp-trigger, .pp-scroll, .pp-caption, .pp-lift-control, .pp-transition, .pp-sheet { transition: none; }
+  }
+</style>

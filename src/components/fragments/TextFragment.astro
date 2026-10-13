@@ -1,0 +1,695 @@
+---
+import fragments from "../../data/fragments.json";
+import { getEntry, render } from "astro:content";
+import ReturnMenu from "../ReturnMenu.astro";
+
+interface FollowOption {
+  label: string;
+   labelEn?: string;
+  target: string;
+}
+
+interface TextFragmentData {
+  id: string;
+  type: "text";
+  template?: string;
+  contentId?: string;
+  date?: string;
+  location?: string;
+  follow?: FollowOption[];
+}
+
+interface Props {
+  fragment: TextFragmentData;
+}
+
+const { fragment } = Astro.props as Props;
+
+const contentId = fragment.contentId ?? fragment.id;
+const followOptions: FollowOption[] = fragment.follow ?? [];
+
+const allFragmentIds: string[] = fragments.map(
+  (item) => String(item.id)
+);
+
+const chineseEntry = await getEntry(
+  "fragmentTexts",
+  `${contentId}-zh`
+);
+
+const englishEntry = await getEntry(
+  "fragmentTexts",
+  `${contentId}-en`
+);
+
+if (!chineseEntry) {
+  throw new Error(
+    `Chinese text file not found: ${contentId}-zh.md`
+  );
+}
+
+const { Content: ChineseContent } =
+  await render(chineseEntry);
+
+const EnglishContent = englishEntry
+  ? (await render(englishEntry)).Content
+  : null;
+---
+
+{
+  (fragment.location || fragment.date) && (
+    <div class="text-information">
+      {[fragment.location, fragment.date]
+        .filter(Boolean)
+        .join(" | ")}
+    </div>
+  )
+}
+
+<article
+  class="text-fragment"
+  data-text-fragment
+  data-language="zh"
+>
+
+<div class="follow-menu">
+  <span class="follow-trigger">
+    <span>follow</span>
+
+    <span
+      class="follow-arrow"
+      aria-hidden="true"
+    >
+      ▽
+    </span>
+  </span>
+
+  {
+    followOptions.length > 0 && (
+      <nav
+        class="follow-options"
+        aria-label="Related fragments"
+      >
+        {
+          followOptions.map((option) => (
+            <a
+              href={`/fragments/${option.target}/`}
+              data-path-label={option.label}
+              data-path-label-zh={option.label}
+              data-path-label-en={
+                option.labelEn ?? option.label
+              }
+            >
+              <span data-follow-language="zh">
+                {option.label}
+              </span>
+
+              <span
+                data-follow-language="en"
+                hidden
+              >
+                {option.labelEn ?? option.label}
+              </span>
+            </a>
+          ))
+        }
+      </nav>
+    )
+  }
+</div>
+
+  <button
+    class="language-button"
+    type="button"
+    data-language-toggle
+    aria-label="Switch to English"
+  >
+    EN
+  </button>
+
+  <main class="text-stage">
+    <section
+      class="language-panel chinese-panel"
+      lang="zh-CN"
+      data-language-panel="zh"
+    >
+      <ChineseContent />
+    </section>
+
+    <section
+      class="language-panel english-panel"
+      lang="en"
+      data-language-panel="en"
+      hidden
+    >
+      {
+        EnglishContent ? (
+          <EnglishContent />
+        ) : (
+          <p>English translation forthcoming.</p>
+        )
+      }
+    </section>
+  </main>
+
+<div class="return-button">
+  <ReturnMenu fragmentId={fragment.id} />
+</div>
+
+<a
+  class="path-link"
+  href="/path/"
+>
+  path
+</a>
+
+<button
+  class="drift-button"
+  type="button"
+  data-drift
+  data-current-id={fragment.id}
+  data-fragment-ids={JSON.stringify(allFragmentIds)}
+>
+  <span>drift</span>
+  <em>elsewhere</em>
+  <span aria-hidden="true">▷</span>
+</button>
+</article>
+
+<script>
+  // 中英文切换
+
+  document
+    .querySelectorAll<HTMLElement>(
+      "[data-text-fragment]"
+    )
+    .forEach((page) => {
+      const languageButton =
+        page.querySelector<HTMLButtonElement>(
+          "[data-language-toggle]"
+        );
+
+      const languagePanels =
+        page.querySelectorAll<HTMLElement>(
+          "[data-language-panel]"
+        );
+
+      const followLabels =
+        page.querySelectorAll<HTMLElement>(
+          "[data-follow-language]"
+        );
+
+      if (
+        !(
+          languageButton instanceof
+          HTMLButtonElement
+        )
+      ) {
+        return;
+      }
+
+      const safeLanguageButton:
+        HTMLButtonElement = languageButton;
+
+      function showLanguage(
+        language: "zh" | "en"
+      ) {
+        languagePanels.forEach((panel) => {
+          panel.hidden =
+            panel.dataset.languagePanel !==
+            language;
+        });
+
+        followLabels.forEach((label) => {
+          label.hidden =
+            label.dataset.followLanguage !==
+            language;
+        });
+
+        page.dataset.language = language;
+
+        if (language === "zh") {
+          safeLanguageButton.textContent = "EN";
+          safeLanguageButton.setAttribute(
+            "aria-label",
+            "Switch to English"
+          );
+        } else {
+          safeLanguageButton.textContent = "中";
+          safeLanguageButton.setAttribute(
+            "aria-label",
+            "切换到中文"
+          );
+        }
+      }
+
+      safeLanguageButton.addEventListener(
+        "click",
+        () => {
+          const currentLanguage =
+            page.dataset.language === "en"
+              ? "en"
+              : "zh";
+
+          showLanguage(
+            currentLanguage === "zh"
+              ? "en"
+              : "zh"
+          );
+        }
+      );
+
+      showLanguage("zh");
+    });
+
+  // 返回上一个站内页面
+
+  document
+    .querySelectorAll<HTMLButtonElement>(
+      "[data-return]"
+    )
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        const previousUrl = document.referrer;
+
+        if (previousUrl) {
+          const previousOrigin =
+            new URL(previousUrl).origin;
+
+          if (
+            previousOrigin ===
+            window.location.origin
+          ) {
+            window.history.back();
+            return;
+          }
+        }
+
+        window.location.assign("/");
+      });
+    });
+
+  // 随机进入另一个 fragment
+
+  document
+    .querySelectorAll<HTMLButtonElement>(
+      "[data-drift]"
+    )
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        const currentId =
+          button.dataset.currentId;
+
+        const encodedIds =
+          button.dataset.fragmentIds ?? "[]";
+
+        let allIds: string[] = [];
+
+        try {
+          const parsedIds: unknown =
+            JSON.parse(encodedIds);
+
+          if (Array.isArray(parsedIds)) {
+            allIds = parsedIds.filter(
+              (id): id is string =>
+                typeof id === "string"
+            );
+          }
+        } catch (error) {
+          console.error(
+            "Could not read fragment IDs:",
+            error
+          );
+        }
+
+        const possibleIds = allIds.filter(
+          (id) => id !== currentId
+        );
+
+        if (possibleIds.length === 0) {
+          window.location.assign("/");
+          return;
+        }
+
+        const randomIndex = Math.floor(
+          Math.random() *
+            possibleIds.length
+        );
+
+        const nextId =
+          possibleIds[randomIndex];
+
+        if (!nextId) {
+          window.location.assign("/");
+          return;
+        }
+
+        window.location.assign(
+          `/fragments/${encodeURIComponent(
+            nextId
+          )}/`
+        );
+      });
+    });
+</script>
+
+
+<style>
+  @font-face {
+    font-family: "HY QiHei X3";
+    src: url("/fonts/HYQiHeiX3.otf")
+      format("opentype");
+    font-style: normal;
+    font-weight: normal;
+    font-display: swap;
+  }
+
+  :global(html),
+  :global(body) {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    background: #fff;
+  }
+
+  :global(*) {
+    box-sizing: border-box;
+  }
+
+  :global(body) {
+    overflow-x: hidden;
+    overflow-y: auto;
+    font-family: Verdana, sans-serif;
+  }
+
+  .text-fragment {
+    --interface-font-size: 12px;
+
+    min-height: 100vh;
+    min-height: 100dvh;
+    background: #fff;
+    color: #111;
+    font-family: Verdana, sans-serif;
+    font-size: var(--interface-font-size);
+  }
+.text-information {
+  position: fixed;
+  bottom: 64px;
+  left: 50%;
+  z-index: 10;
+  width: min(520px, calc(100vw - 64px));
+  transform: translateX(-50%);
+  color: #777;
+  font-family: Verdana, Arial, sans-serif;
+  font-size: 11px;
+  font-weight: normal;
+  line-height: 1.6;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .text-information {
+    bottom: 56px;
+    width: calc(100vw - 40px);
+    font-size: 10px;
+  }
+}
+  /* 左上角：项目名称 */
+
+  .project-link {
+    position: fixed;
+    top: 17px;
+    left: 14px;
+    z-index: 20;
+    color: #111;
+    font-family: Verdana, sans-serif;
+    font-size: var(--interface-font-size);
+    text-decoration: none;
+  }
+
+  .project-link:hover {
+    opacity: 0.5;
+  }
+
+  /* 右上角：Follow */
+
+  .follow-menu {
+    position: fixed;
+    top: 15px;
+    right: 14px;
+    z-index: 20;
+    min-width: 130px;
+    padding-bottom: 10px;
+    text-align: right;
+  }
+
+  .follow-trigger {
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+    justify-content: flex-end;
+    color: #111;
+    font-family: Verdana, sans-serif;
+    font-size: var(--interface-font-size);
+    cursor: default;
+  }
+
+  .follow-arrow {
+    display: inline-block;
+    font-size: 9px;
+    line-height: 1;
+    transition: transform 180ms ease;
+  }
+
+  .follow-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 130px;
+    padding-top: 8px;
+
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-3px);
+
+    transition:
+      opacity 180ms ease,
+      visibility 180ms ease,
+      transform 180ms ease;
+  }
+
+  .follow-menu:hover .follow-options,
+  .follow-menu:focus-within .follow-options {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
+  .follow-menu:hover .follow-arrow,
+  .follow-menu:focus-within .follow-arrow {
+    transform: rotate(180deg);
+  }
+
+  .follow-options a {
+    color: #999;
+    font-family: Verdana, sans-serif;
+    font-size: var(--interface-font-size);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .follow-options a:hover {
+    color: #111;
+  }
+
+  /* 左侧：中英文切换 */
+
+  .language-button {
+    position: fixed;
+    top: 50%;
+    left: 28px;
+    z-index: 20;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #111;
+    font-family: Verdana, sans-serif;
+    font-size: var(--interface-font-size);
+    cursor: pointer;
+    transform: translateY(-50%);
+  }
+
+  .language-button:hover {
+    opacity: 0.5;
+  }
+
+  /* 正文区域 */
+
+  .text-stage {
+    width: min(520px, 72vw);
+    margin: 0 auto;
+    padding: 100px 0 130px;
+  }
+
+  .language-panel {
+    width: 100%;
+  }
+
+  .chinese-panel {
+    font-family:
+      "HY QiHei X3",
+      "PingFang SC",
+      "Microsoft YaHei",
+      sans-serif;
+    font-size: clamp(14px, 0.95vw, 16px);
+    line-height: 1.8;
+  }
+
+  .english-panel {
+    font-family: Verdana, sans-serif;
+    font-size: clamp(13px, 0.9vw, 15px);
+    line-height: 1.8;
+  }
+
+  .language-panel :global(h1) {
+    margin: 0 0 36px;
+    font-family: inherit;
+    font-size: 1em;
+    font-weight: 700;
+  }
+
+  .language-panel :global(p) {
+    margin: 0 0 1.7em;
+    font-family: inherit;
+  }
+
+  .language-panel :global(a) {
+    color: #999;
+    font-family: inherit;
+    text-decoration: none;
+    transition: color 150ms ease;
+  }
+
+  .language-panel :global(a:hover) {
+    color: #111;
+  }
+
+  /* 左下角与右下角 */
+
+  .return-button,
+  .drift-button {
+    position: fixed;
+    bottom: 17px;
+    z-index: 20;
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #111;
+    font-family: Verdana, sans-serif;
+    font-size: var(--interface-font-size);
+    cursor: pointer;
+  }
+
+  .return-button {
+    left: 14px;
+  }
+
+  .drift-button {
+    right: 14px;
+  }
+
+  .drift-button em {
+    color: #999;
+    font-style: italic;
+  }
+
+  .return-button:hover,
+  .drift-button:hover {
+    opacity: 0.5;
+  }
+.path-link {
+  position: fixed;
+  bottom: 17px;
+  left: 50%;
+  z-index: 20;
+  color: #111;
+  font-family: Verdana, sans-serif;
+  font-size: var(--interface-font-size);
+  text-decoration: none;
+  transform: translateX(-50%);
+}
+
+.path-link:hover {
+  opacity: 0.5;
+}
+
+.path-link:focus-visible {
+  outline: 1px solid #111;
+  outline-offset: 4px;
+}
+  /* 键盘焦点 */
+
+  .project-link:focus-visible,
+  .follow-options a:focus-visible,
+  .language-button:focus-visible,
+  .return-button:focus-visible,
+  .drift-button:focus-visible {
+    outline: 1px solid #111;
+    outline-offset: 4px;
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+
+  /* 手机 */
+
+  @media (max-width: 700px) {
+    .project-link {
+      top: 16px;
+      left: 16px;
+    }
+
+    .follow-menu {
+      top: 16px;
+      right: 16px;
+    }
+
+    .language-button {
+      top: 62px;
+      left: 16px;
+      transform: none;
+    }
+
+    .text-stage {
+      width: auto;
+      padding: 105px 35px 100px;
+    }
+
+    .return-button,
+    .drift-button {
+      bottom: 16px;
+    }
+
+    .return-button {
+      left: 16px;
+    }
+
+    .drift-button {
+      right: 16px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .follow-arrow,
+    .follow-options {
+      transition: none;
+    }
+  }
+</style>

@@ -1,0 +1,238 @@
+---
+import fragmentsSource from "../../data/fragments.json";
+import ConstellationAtlas from "../../components/ConstellationAtlas.astro";
+import "../../styles/fonts.css";
+
+export function getStaticPaths() {
+  const names = [...new Set(fragmentsSource.flatMap((fragment) => fragment.constellations || []))];
+  return names.map((groupName) => ({
+    params: { group: groupName },
+    props: { groupName },
+  }));
+}
+
+const { groupName } = Astro.props as { groupName: string };
+const memberIds = fragmentsSource
+  .filter((fragment) => fragment.constellations?.includes(groupName))
+  .map((fragment) => fragment.id);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>{groupName} — fragments of elsewhere</title>
+  </head>
+  <body>
+    <main data-constellation-page data-member-ids={JSON.stringify(memberIds)}>
+      <ConstellationAtlas mode="group" groupName={groupName} />
+      <a
+        class="constellation-mini-map"
+        href="/"
+        aria-label={`Return to atlas. ${groupName} is highlighted in the overview.`}
+        data-constellation-fade
+      >
+        <ConstellationAtlas mode="mini" groupName={groupName} />
+      </a>
+      <h1 class="current-constellation" data-foe-group-title>{groupName}</h1>
+      <nav aria-label="Constellation navigation">
+        <a class="corner-link corner-bottom-left" href="/" data-constellation-fade>return</a>
+        <button class="corner-link corner-bottom-right" type="button" data-constellation-drift>drift elsewhere</button>
+      </nav>
+    </main>
+    <div class="constellation-transition" data-constellation-transition aria-hidden="true"></div>
+  </body>
+</html>
+
+<script>
+  type FadeRuntime = Window & {
+    elsewhereNavigate?: (href: string) => void;
+    constellationFadeNavigate?: (href: string) => void;
+  };
+
+  const runtime = window as FadeRuntime;
+  const FADE_DURATION = 400;
+  const prefersReducedMotion = () =>
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function enterConstellationPage() {
+    const page = document.querySelector<HTMLElement>("[data-constellation-page]");
+    const overlay = document.querySelector<HTMLElement>("[data-constellation-transition]");
+    if (!page || !overlay) return;
+    delete page.dataset.constellationLeaving;
+    document.body.classList.remove("is-leaving");
+    overlay.style.pointerEvents = "none";
+    // Reset before fading, including when returning via browser history.
+    overlay.style.transition = "none";
+    overlay.style.opacity = "1";
+    void overlay.offsetWidth;
+    overlay.style.transition = "";
+    if (prefersReducedMotion()) {
+      overlay.style.opacity = "0";
+      return;
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { overlay.style.opacity = "0"; });
+    });
+  }
+
+  function installConstellationFade() {
+    if (runtime.constellationFadeNavigate &&
+        runtime.elsewhereNavigate === runtime.constellationFadeNavigate) return;
+    const previousNavigate = runtime.elsewhereNavigate;
+    const constellationNavigate = (href: string) => {
+      const page = document.querySelector<HTMLElement>("[data-constellation-page]");
+      const overlay = document.querySelector<HTMLElement>("[data-constellation-transition]");
+      // Reuse the site's original behaviour after a client-side page swap.
+      if (!page || !overlay) {
+        if (typeof previousNavigate === "function") previousNavigate(href);
+        else window.location.assign(href);
+        return;
+      }
+      if (page.dataset.constellationLeaving === "true") return;
+      page.dataset.constellationLeaving = "true";
+      overlay.style.pointerEvents = "auto";
+      overlay.style.opacity = "1";
+      const delay = prefersReducedMotion() ? 0 : FADE_DURATION + 30;
+      window.setTimeout(() => window.location.assign(href), delay);
+    };
+    runtime.constellationFadeNavigate = constellationNavigate;
+    runtime.elsewhereNavigate = constellationNavigate;
+  }
+
+  function initialiseConstellationPages() {
+    if (!document.querySelector("[data-constellation-page]")) return;
+    installConstellationFade();
+    enterConstellationPage();
+    document.querySelectorAll<HTMLElement>("[data-constellation-page]:not([data-constellation-page-ready])")
+      .forEach((page) => {
+        page.querySelectorAll<HTMLAnchorElement>("[data-constellation-fade]")
+          .forEach((link) => {
+            link.addEventListener("click", (event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              runtime.elsewhereNavigate?.(link.href);
+            });
+          });
+        const memberIds = JSON.parse(page.dataset.memberIds || "[]") as string[];
+        page.querySelector<HTMLButtonElement>("[data-constellation-drift]")
+          ?.addEventListener("click", () => {
+            if (!memberIds.length) return;
+            const id = memberIds[Math.floor(Math.random() * memberIds.length)];
+            runtime.elsewhereNavigate?.(`/fragments/${encodeURIComponent(id)}/`);
+          });
+        page.dataset.constellationPageReady = "true";
+      });
+  }
+  initialiseConstellationPages();
+  document.addEventListener("astro:page-load", initialiseConstellationPages);
+  window.addEventListener("pageshow", enterConstellationPage);
+</script>
+
+<style is:global>
+  html, body { margin: 0; background: #fff; color: #171717; }
+  body {
+    font-family: Verdana, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .constellation-transition {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: #fff;
+    opacity: 1;
+    pointer-events: none;
+    transition: opacity 400ms ease;
+  }
+  .current-constellation, .corner-link {
+    position: fixed;
+    z-index: 110;
+    margin: 0;
+    color: inherit;
+    font: 13px/1.35 Verdana, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .current-constellation {
+    top: max(22px, env(safe-area-inset-top, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(48vw, 36rem);
+    text-align: center;
+    overflow-wrap: anywhere;
+    font-weight: 600;
+    pointer-events: none;
+  }
+  .corner-link {
+    text-decoration: none;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .constellation-mini-map {
+    position: fixed;
+    top: max(22px, env(safe-area-inset-top, 0px));
+    left: max(24px, env(safe-area-inset-left, 0px));
+    z-index: 120;
+    display: block;
+    width: 170px;
+    height: 120px;
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1px solid #e5e5e5;
+    background: #fff;
+    text-decoration: none;
+    cursor: pointer;
+    transition: border-color 180ms ease;
+  }
+  .constellation-mini-map:hover { border-color: #999; }
+  .constellation-mini-map:focus-visible {
+    outline: 1px solid currentColor;
+    outline-offset: 4px;
+  }
+  @media (max-width: 600px) {
+    .constellation-mini-map {
+      top: max(16px, env(safe-area-inset-top, 0px));
+      left: max(14px, env(safe-area-inset-left, 0px));
+      width: 100px;
+      height: 74px;
+    }
+    .current-constellation {
+      top: max(16px, env(safe-area-inset-top, 0px));
+      width: calc(100vw - 248px);
+      font-size: 12px;
+    }
+  }
+  .corner-bottom-left { bottom: max(22px, env(safe-area-inset-bottom, 0px)); left: max(24px, env(safe-area-inset-left, 0px)); }
+  .corner-bottom-right { bottom: max(22px, env(safe-area-inset-bottom, 0px)); right: max(24px, env(safe-area-inset-right, 0px)); }
+  .corner-link:hover { opacity: 0.6; }
+  .corner-link:focus-visible { outline: 1px solid currentColor; outline-offset: 5px; }
+  @media (prefers-reduced-motion: reduce) {
+    .constellation-transition { transition: none; }
+  }
+
+  [data-constellation-page] .current-constellation {
+  position: fixed;
+  top: calc(max(22px, env(safe-area-inset-top, 0px)) + 130px) !important;
+  left: max(24px, env(safe-area-inset-left, 0px)) !important;
+  right: auto !important;
+  transform: none !important;
+  width: 170px !important;
+  margin: 0;
+  text-align: center !important;
+  font-size: 16px !important;
+  font-weight: 400 !important;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  z-index: 110;
+}
+
+@media (max-width: 600px) {
+  [data-constellation-page] .current-constellation {
+    top: calc(max(16px, env(safe-area-inset-top, 0px)) + 84px) !important;
+    left: max(14px, env(safe-area-inset-left, 0px)) !important;
+    width: 100px !important;
+    font-size: 16px !important;
+  }
+}
+</style>

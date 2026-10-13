@@ -1,0 +1,94 @@
+<script>
+  type FragmentLanguage = "zh" | "en";
+  type LanguageFadeWindow = Window & { foeLanguageFadeReady?: boolean };
+  const languageFadeRuntime = window as LanguageFadeWindow;
+
+  if (!languageFadeRuntime.foeLanguageFadeReady) {
+    languageFadeRuntime.foeLanguageFadeReady = true;
+    const changingPages = new WeakSet<HTMLElement>();
+
+    // Each phase lasts 200ms: fade out, switch language, then fade in.
+    const FADE_DURATION = 200;
+
+    const applyLanguage = (
+      page: HTMLElement,
+      button: HTMLButtonElement,
+      language: FragmentLanguage,
+    ) => {
+      page.querySelectorAll<HTMLElement>("[data-language-panel]").forEach((panel) => {
+        panel.hidden = panel.dataset.languagePanel !== language;
+      });
+      page.querySelectorAll<HTMLElement>("[data-follow-language]").forEach((label) => {
+        label.hidden = label.dataset.followLanguage !== language;
+      });
+      page.dataset.language = language;
+      button.textContent = language === "zh" ? "EN" : "中";
+      button.setAttribute("aria-label", language === "zh" ? "Switch to English" : "切换到中文");
+    };
+
+    const switchLanguage = async (
+      page: HTMLElement,
+      button: HTMLButtonElement,
+      stage: HTMLElement,
+    ) => {
+      if (changingPages.has(page)) return;
+      changingPages.add(page);
+      const language: FragmentLanguage = page.dataset.language === "en" ? "zh" : "en";
+      const previousBusy = stage.getAttribute("aria-busy");
+      stage.setAttribute("aria-busy", "true");
+      let fadeOut: Animation | undefined;
+      let fadeIn: Animation | undefined;
+
+      try {
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+            typeof stage.animate !== "function") {
+          applyLanguage(page, button, language);
+          return;
+        }
+
+        fadeOut = stage.animate([{ opacity: 1 }, { opacity: 0 }], {
+          duration: FADE_DURATION,
+          easing: "ease-in-out",
+          fill: "forwards",
+        });
+        await fadeOut.finished;
+        if (!page.isConnected || !stage.isConnected) return;
+
+        applyLanguage(page, button, language);
+        fadeIn = stage.animate([{ opacity: 0 }, { opacity: 1 }], {
+          duration: FADE_DURATION,
+          easing: "ease-in-out",
+        });
+        fadeOut.cancel();
+        await fadeIn.finished;
+      } catch (error) {
+        // A page navigation can cancel an in-progress animation.
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.error("Could not animate the language change:", error);
+          if (page.isConnected) applyLanguage(page, button, language);
+        }
+      } finally {
+        fadeOut?.cancel();
+        fadeIn?.cancel();
+        if (previousBusy === null) stage.removeAttribute("aria-busy");
+        else stage.setAttribute("aria-busy", previousBusy);
+        changingPages.delete(page);
+      }
+    };
+
+    // Capture only language toggles, before the older immediate-switch handler.
+    // Delegation also covers text pages inserted by Astro page navigation.
+    document.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const button = target?.closest<HTMLButtonElement>("button[data-language-toggle]");
+      const page = button?.closest<HTMLElement>("[data-text-fragment]");
+      const stage = page?.querySelector<HTMLElement>(".text-stage");
+      if (!button || !page || !stage) return;
+      if (!page.querySelector('[data-language-panel="zh"]') ||
+          !page.querySelector('[data-language-panel="en"]')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void switchLanguage(page, button, stage);
+    }, true);
+  }
+</script>

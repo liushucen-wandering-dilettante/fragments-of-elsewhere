@@ -1,0 +1,163 @@
+html,
+body {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  background: #ffffff;
+  color: #111;
+  font-family: Verdana, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.path-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 20;
+
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 17px 14px;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.path-header h1 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.path-actions {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.path-actions button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #111;
+  font-family: Verdana, sans-serif;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.path-actions button:hover {
+  opacity: 0.5;
+}
+
+/* 浏览路径 */
+
+.path-grid {
+  display: flex;
+  min-height: 100svh;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: flex-start;
+  gap: 5px;
+
+  padding: 58px 7px 20px;
+}
+
+.path-item {
+  display: block;
+  flex: 0 0 auto;
+  color: #111;
+  text-decoration: none;
+}
+
+/* 图片保持原始比例，不裁切 */
+
+.path-item--image img {
+  display: block;
+
+  width: auto;
+  height: auto;
+
+  max-width: min(48vw, 720px);
+  max-height: calc(55svh - 40px);
+
+  object-fit: contain;
+}
+
+.path-item--image:hover {
+  opacity: 0.8;
+}
+
+/* 文字不再有黑框 */
+
+.path-item--text {
+  display: flex;
+  min-width: 150px;
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+
+  padding: 25px 32px;
+
+  border: 0;
+  background: transparent;
+}
+
+.path-item--text span {
+  font-size: clamp(28px, 5vw, 82px);
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.path-item--text:hover {
+  opacity: 0.5;
+}
+
+/* 没有浏览记录 */
+
+.path-empty {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+
+  margin: 0;
+
+  font-size: 12px;
+
+  transform: translate(-50%, -50%);
+}
+
+/* 键codes盘访问 */
+
+.path-item:focus-visible,
+.path-actions button:focus-visible {
+  outline: 1px solid #111;
+  outline-offset: 4px;
+}
+
+@media (max-width: 700px) {
+  .path-grid {
+    gap: 4px;
+    padding: 58px 8px 16px;
+  }
+
+  .path-item--image img {
+    max-width: calc(100vw - 16px);
+    max-height: 48svh;
+  }
+
+  .path-item--text {
+    min-width: 100px;
+    min-height: 90px;
+    padding: 20px 22px;
+  }
+
+  .path-item--text span {
+    font-size: clamp(24px, 9vw, 54px);
+    white-space: normal;
+  }
+}

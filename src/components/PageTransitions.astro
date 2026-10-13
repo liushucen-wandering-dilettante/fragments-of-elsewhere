@@ -1,0 +1,132 @@
+<!-- Include once in the head of each participating page. -->
+<style is:global>
+  html.elsewhere-transitions-active::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 2147483647;
+    background: #fff;
+    opacity: var(--elsewhere-page-opacity, 1);
+    pointer-events: none;
+    transition: opacity 320ms ease-out;
+  }
+
+  html.elsewhere-page-leaving::after {
+    pointer-events: auto;
+    transition: opacity 220ms ease-in;
+  }
+</style>
+
+<script is:inline>
+  (() => {
+    if (window.elsewhereTransitionsInstalled) return;
+    window.elsewhereTransitionsInstalled = true;
+
+    const root = document.documentElement;
+    root.classList.add("elsewhere-transitions-active");
+    let leaving = false;
+    let revealVersion = 0;
+
+    const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+
+    async function revealPage() {
+      if (leaving) return;
+      const version = ++revealVersion;
+      const deadline = performance.now() + 1500;
+      while (performance.now() < deadline) {
+        const atlases = [...document.querySelectorAll("[data-constellation-atlas]")];
+        if (atlases.every((atlas) => atlas.dataset.atlasReady === "true")) break;
+        await nextFrame();
+      }
+
+      // Give the canvas its first draw and the page its first layout.
+      await nextFrame();
+      await nextFrame();
+      if (leaving || version !== revealVersion) return;
+      root.classList.remove("elsewhere-page-leaving");
+      root.style.setProperty("--elsewhere-page-opacity", "0");
+    }
+
+    function leavePage(action) {
+      if (leaving) return;
+      leaving = true;
+      revealVersion += 1;
+      root.classList.add("elsewhere-page-leaving");
+      root.style.setProperty("--elsewhere-page-opacity", "1");
+      window.setTimeout(action, 220);
+    }
+
+    window.elsewhereNavigate = (href) => {
+      const destination = new URL(href, window.location.href);
+      leavePage(() => window.location.assign(destination.href));
+    };
+
+    document.addEventListener("click", (event) => {
+      if (
+        event.defaultPrevented || event.button !== 0 ||
+        event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+      ) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const returnButton = target.closest("button[data-return]");
+      if (returnButton && !returnButton.disabled) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        let internalPreviousPage = false;
+        try {
+          internalPreviousPage = Boolean(document.referrer) &&
+            new URL(document.referrer).origin === window.location.origin;
+        } catch {}
+        if (internalPreviousPage && window.history.length > 1) {
+          leavePage(() => window.history.back());
+        } else {
+          window.elsewhereNavigate("/");
+        }
+        return;
+      }
+
+      const driftButton = target.closest("button[data-drift]");
+      if (driftButton && !driftButton.disabled) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        let ids = [];
+        try {
+          const parsed = JSON.parse(driftButton.dataset.fragmentIds || "[]");
+          if (Array.isArray(parsed)) {
+            ids = parsed.filter((id) => typeof id === "string" && id !== driftButton.dataset.currentId);
+          }
+        } catch {}
+        const nextId = ids[Math.floor(Math.random() * ids.length)];
+        window.elsewhereNavigate(nextId ? `/fragments/${encodeURIComponent(nextId)}/` : "/");
+        return;
+      }
+
+      const link = target.closest("a[href]");
+      if (!link || link.closest("[data-fragment-path-preview]") || link.hasAttribute("download") ||
+          (link.target && link.target.toLowerCase() !== "_self")) return;
+      const destination = new URL(link.href, window.location.href);
+      if (destination.origin !== window.location.origin ||
+          !["http:", "https:"].includes(destination.protocol)) return;
+      if (destination.pathname === window.location.pathname &&
+          destination.search === window.location.search &&
+          destination.hash) return;
+      event.preventDefault();
+      // Keep link events available to path-tracking listeners.
+      window.elsewhereNavigate(destination.href);
+    }, true);
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", revealPage, { once: true });
+    } else {
+      revealPage();
+    }
+
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted) {
+        leaving = false;
+        revealPage();
+      }
+    });
+  })();
+</script>

@@ -1,0 +1,269 @@
+---
+import fragmentsSource from "../data/fragments.json";
+import DirectionalButtons from "../components/DirectionalButtons.astro";
+import "../styles/fonts.css";
+
+type Fragment = {
+  id: string;
+  type: "image" | "video" | "audio" | "text";
+  image?: string;
+  poster?: string;
+  alt?: string;
+  description?: string;
+  title?: string;
+  titleEn?: string;
+};
+
+const fragments = fragmentsSource as Fragment[];
+const labelFor = (fragment: Fragment) =>
+  fragment.type === "text"
+    ? fragment.titleEn || fragment.title || "Text fragment"
+    : fragment.alt || fragment.description || fragment.title || `${fragment.type} fragment`;
+
+const paperMarksFor = (id: string) => {
+  const seed = Array.from(id).reduce((total, character) => total + character.charCodeAt(0), 0);
+  return Array.from({ length: 18 }, (_, index) => {
+    const first = Math.sin((seed + index * 17.13) * 12.9898) * 43758.5453;
+    const second = Math.sin((seed + index * 31.71) * 7.233) * 19423.115;
+    const third = Math.sin((seed + index * 47.29) * 3.177) * 9271.417;
+    const x = (first - Math.floor(first)) * 26 - 15;
+    const y = (second - Math.floor(second)) * 38 - 20;
+    const length = 1.5 + (third - Math.floor(third)) * 3.5;
+    return { x, y, endX: x + length, endY: y + length * 0.18 };
+  });
+};
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>path — fragments of elsewhere</title>
+  </head>
+  <body>
+    <DirectionalButtons />
+    <main class="path-page" data-path-page>
+      <h1 class="sr-only">Your path through fragments of elsewhere</h1>
+      <button class="path-control path-reset" type="button" data-path-reset>reset</button>
+      <button class="path-control path-close" type="button" aria-label="Return to the previous fragment" data-path-close></button>
+
+      <div class="path-viewport" data-path-viewport tabindex="0" aria-label="Browsing path. Scroll to view the fragments in visit order.">
+        <ol class="path-list" aria-label="Fragments in visit order" data-path-list></ol>
+        <p class="path-empty" role="status" data-path-empty hidden>no fragments visited yet</p>
+      </div>
+
+      {fragments.map((fragment) => (
+        <template data-path-template={fragment.id}>
+          <li class="path-item">
+            <a class="path-fragment" href={`/fragments/${encodeURIComponent(fragment.id)}/`} aria-label={labelFor(fragment)}>
+              <span class="path-media" data-path-media data-media-kind={fragment.type}>
+                {fragment.type === "image" || fragment.type === "video" ? (
+                  <>
+                    <img class="path-preview" src={`/thumbnails-proportional/${fragment.id}.webp`} data-original-src={fragment.type === "image" ? fragment.image : fragment.poster} alt={labelFor(fragment)} loading="lazy" decoding="async" />
+                    <svg class="path-media-fallback" viewBox="0 0 46 34" aria-hidden="true">
+                      <rect x="0.5" y="0.5" width="45" height="33" fill="#f2f2ef" stroke="#c7c7c2" />
+                      {fragment.type === "video" ? (
+                        <path d="M18 9 L31 17 L18 25 Z" fill="#777770" />
+                      ) : (
+                        <>
+                          <circle cx="33" cy="10" r="3" fill="#b8b8af" />
+                          <path d="M4 29 L15 14 L25 25 L32 19 L42 29 Z" fill="#b8b8af" />
+                        </>
+                      )}
+                    </svg>
+                    {fragment.type === "video" && (
+                      <svg class="path-video-marker" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2 L13 8 L4 14 Z" fill="none" stroke="white" stroke-width="1.4" stroke-linejoin="round" /></svg>
+                    )}
+                  </>
+                ) : fragment.type === "audio" ? (
+                  <svg class="path-audio-icon" viewBox="-25 -17 50 34" aria-hidden="true">
+                    <path d="M-21.5 -17 H21.5 L25 -13.5 V17 H-25 V-13.5 Z" fill="#f1f1ec" stroke="#bcbcb5" stroke-width=".55" />
+                    <rect x="-22" y="-13" width="44" height="17" fill="#deded8" fill-opacity=".38" />
+                    <rect x="-7.5" y="-8" width="15" height="10.5" fill="#f8f8f4" />
+                    <rect x="-5.2" y="-7.1" width="4.4" height="8.7" fill="#3d3832" fill-opacity=".72" />
+                    <rect x="1.1" y="-7.1" width="4.1" height="8.7" fill="#fffffc" />
+                    {[-13, 13].map((reelX) => (
+                      <g transform={`translate(${reelX} -2.5)`}>
+                        <circle r="5.6" fill="#fffffb" stroke="#b9b8ae" stroke-width=".5" />
+                        <circle r="2.2" fill="#c1c1b9" fill-opacity=".58" />
+                        {Array.from({ length: 6 }, (_, index) => {
+                          const angle = index * Math.PI / 3;
+                          return <line x1={Math.cos(angle) * 3} y1={Math.sin(angle) * 3} x2={Math.cos(angle) * 4.5} y2={Math.sin(angle) * 4.5} stroke="#b6b4a9" stroke-width=".7" />;
+                        })}
+                      </g>
+                    ))}
+                    <path d="M-17 5 H17 L20 17 H-20 Z" fill="#e2e1da" fill-opacity=".72" />
+                    {[-12, -4, 4, 12].map((x, index) => <circle cx={x} cy="12.2" r={index === 0 || index === 3 ? 1.8 : 1.3} fill="#7d796f" fill-opacity=".34" />)}
+                    {[[-21.8, -14], [21.8, -14], [-21.8, 14], [21.8, 14], [0, 7.5]].map(([x, y]) => (
+                      <g><circle cx={x} cy={y} r="1.05" fill="#5c5850" fill-opacity=".48" /><line x1={x - .65} y1={y} x2={x + .65} y2={y} stroke="#fafaf7" stroke-width=".35" /></g>
+                    ))}
+                  </svg>
+                ) : (
+                  <svg class="path-text-icon" viewBox="-18 -23 36 46" aria-hidden="true">
+                    <path d="M-18 -22.65 L-15 -22.45 L-12 -22.85 L-9 -22.45 L-6 -22.85 L-3 -22.45 L0 -22.85 L3 -22.45 L6 -22.85 L9 -22.45 L12 -22.85 L15 -22.45 L18 -22.85 V16.125 Q18 21.9 12.5 23 H-18 Z" fill="#f0ecdf" />
+                    {paperMarksFor(fragment.id).map((mark) => <line x1={mark.x} y1={mark.y} x2={mark.endX} y2={mark.endY} stroke="#66583e" stroke-opacity=".12" stroke-width=".35" />)}
+                    <path d="M-16.5 -.46 Q0 .19 16.5 -.36" fill="none" stroke="#6b5b42" stroke-opacity=".14" stroke-width=".55" />
+                    <path d="M18 16.125 Q16.625 21.075 12.5 23 L14.04 19.15 Z" fill="#cdc3b0" />
+                  </svg>
+                )}
+                <span class="path-caption">{labelFor(fragment)}</span>
+              </span>
+            </a>
+          </li>
+        </template>
+      ))}
+    </main>
+    <div class="path-transition" data-path-transition aria-hidden="true"></div>
+  </body>
+</html>
+
+<script>
+  function installPreviewFallback(image: HTMLImageElement, signal: AbortSignal) {
+    const media = image.closest<HTMLElement>("[data-media-kind]");
+    let triedOriginal = false;
+    const fallback = () => {
+      const original = image.dataset.originalSrc;
+      if (!triedOriginal && original && original !== image.getAttribute("src")) {
+        triedOriginal = true;
+        media?.classList.remove("is-missing");
+        image.src = original;
+        return;
+      }
+      media?.classList.add("is-missing");
+    };
+    image.addEventListener("error", fallback, { signal });
+    image.addEventListener("load", () => media?.classList.remove("is-missing"), { once: true, signal });
+    if (image.complete && !image.naturalWidth) fallback();
+  }
+
+  const STORAGE_KEY = "fragments-of-elsewhere:session-path";
+  const embedded = window.parent !== window && new URLSearchParams(window.location.search).get("sheet") === "1";
+  const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let disposePathPage: (() => void) | undefined;
+  let activePathPage: HTMLElement | null = null;
+
+  function initialisePathPage() {
+    const page = document.querySelector<HTMLElement>("[data-path-page]");
+    if (!page) return;
+    if (page === activePathPage && page.isConnected) {
+      page.dispatchEvent(new Event("path:refresh"));
+      return;
+    }
+    disposePathPage?.();
+    activePathPage = page;
+    const abort = new AbortController();
+    const signal = abort.signal;
+    const list = page.querySelector<HTMLOListElement>("[data-path-list]")!;
+    const viewport = page.querySelector<HTMLElement>("[data-path-viewport]")!;
+    const empty = page.querySelector<HTMLElement>("[data-path-empty]")!;
+    const templates = new Map(Array.from(page.querySelectorAll<HTMLTemplateElement>("[data-path-template]"),
+      template => [template.dataset.pathTemplate!, template] as const));
+    let leaving = false;
+    function renderPath() {
+      let entries: unknown[] = [];
+      try {
+        const stored: unknown = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "[]");
+        if (Array.isArray(stored)) entries = stored;
+      } catch {}
+      const content = document.createDocumentFragment();
+      entries.forEach(entry => {
+        const id = typeof entry === "string" ? entry : entry && typeof entry === "object" && "id" in entry ? String(entry.id) : "";
+        const template = templates.get(id);
+        if (template) content.append(template.content.cloneNode(true));
+      });
+      list.replaceChildren(content);
+      empty.hidden = list.children.length !== 0;
+      list.querySelectorAll<HTMLImageElement>(".path-preview").forEach(image => {
+        installPreviewFallback(image, signal);
+      });
+      viewport.scrollTop = 0;
+    }
+    function closePath() {
+      if (leaving) return;
+      leaving = true;
+      if (embedded) {
+        window.parent.postMessage({ type: "foe:path-close" }, window.location.origin);
+        return;
+      }
+      page!.classList.add("is-closing");
+      window.setTimeout(() => {
+        let previous = "";
+        try { previous = sessionStorage.getItem("fragments-of-elsewhere:path-return") || document.referrer; } catch { previous = document.referrer; }
+        try {
+          const destination = new URL(previous);
+          if (destination.origin === window.location.origin && destination.pathname.startsWith("/fragments/")) {
+            window.location.assign(destination.href);
+            return;
+          }
+        } catch {}
+        if (window.history.length > 1) window.history.back();
+        else window.location.assign("/");
+      }, reducedMotion() ? 0 : 560);
+    }
+    page.querySelector("[data-path-close]")?.addEventListener("click", closePath, { signal });
+    page.querySelector("[data-path-reset]")?.addEventListener("click", () => {
+      try { sessionStorage.removeItem(STORAGE_KEY); } catch { return; }
+      renderPath();
+    }, { signal });
+    viewport.addEventListener("dragstart", event => event.preventDefault(), { signal });
+    list.addEventListener("click", event => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a.path-fragment") : null;
+      if (!link || leaving) return;
+      event.preventDefault();
+      leaving = true;
+      if (embedded) window.parent.postMessage({ type: "foe:path-navigate", href: link.href }, window.location.origin);
+      else window.location.assign(link.href);
+    }, { signal });
+    window.addEventListener("storage", event => { if (event.storageArea === sessionStorage && (event.key === STORAGE_KEY || event.key === null)) renderPath(); }, { signal });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") { event.preventDefault(); closePath(); }
+    }, { signal });
+    page.addEventListener("path:refresh", () => { leaving = false; page.classList.remove("is-closing"); renderPath(); }, { signal });
+    renderPath();
+    disposePathPage = () => { abort.abort(); activePathPage = null; };
+  }
+  initialisePathPage();
+  document.addEventListener("astro:page-load", initialisePathPage);
+  document.addEventListener("astro:before-swap", () => { disposePathPage?.(); disposePathPage = undefined; });
+  window.addEventListener("pageshow", initialisePathPage);
+</script>
+
+<style is:global>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #fff; color: #171717; }
+  body { font-family: "PT Sans", "HY QiHei X3 Web", sans-serif; }
+  .path-page { position: fixed; inset: 0; background: #fff; transition: transform 560ms cubic-bezier(.22, .72, .24, 1); }
+  .path-page.is-closing { transform: translateY(100%); }
+  .path-control { position: fixed; z-index: 110; padding: 0; border: 0; background: transparent; color: inherit; font: 400 17px/1.35 "PT Sans", "HY QiHei X3 Web", sans-serif; cursor: pointer; }
+  .path-reset { top: auto; bottom: max(22px, env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); }
+  .path-close { top: max(14px, env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); width: 32px; height: 32px; justify-content: center; }
+  .path-control:hover { opacity: .6; }
+  .path-control:focus-visible, .path-fragment:focus-visible { outline: 1px solid currentColor; outline-offset: 6px; }
+  .path-viewport { position: absolute; inset: 68px 32px 68px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
+  .path-viewport:focus-visible { outline: 1px solid #ddd; outline-offset: 4px; }
+  .path-list { display: grid; grid-template-columns: repeat(auto-fit, 126px); justify-content: center; gap: 42px 32px; width: 100%; max-width: 1074px; margin: 0 auto; padding: 12px 0; list-style: none; }
+  .path-item { display: flex; justify-content: center; }
+  .path-fragment { display: flex; align-items: center; justify-content: center; width: 126px; height: 142px; text-decoration: none; color: inherit; }
+  .path-media { position: relative; display: inline-flex; align-items: center; justify-content: center; max-width: 126px; max-height: 126px; }
+  .path-preview { display: block; width: auto; height: auto; max-width: 126px; max-height: 126px; }
+  .path-audio-icon { display: block; width: 126px; height: auto; overflow: visible; filter: drop-shadow(0 2px 3px rgb(55 50 42 / .16)); }
+  .path-text-icon { display: block; width: auto; height: 126px; overflow: visible; filter: drop-shadow(2px 3px 4px rgb(58 48 36 / .16)); }
+  .path-media-fallback { display: none; width: 126px; height: auto; }
+  .path-media.is-missing .path-preview, .path-media.is-missing .path-video-marker { display: none; }
+  .path-media.is-missing .path-media-fallback { display: block; }
+  .path-video-marker { position: absolute; right: 6px; bottom: 6px; width: 14px; height: 14px; filter: drop-shadow(0 0 1px #444); }
+  .path-caption { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 8px; opacity: 0; background: rgb(255 255 255 / .68); text-align: center; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; line-height: 1.35; transition: opacity 180ms ease, background-color 180ms ease; }
+  .path-media[data-media-kind="text"] .path-caption,
+  .path-media[data-media-kind="audio"] .path-caption { opacity: 1; background: transparent; color: #514b42; }
+  .path-media[data-media-kind="text"] .path-caption { padding: 12% 15%; }
+  .path-media[data-media-kind="audio"] .path-caption { inset: 0; padding: 6px; font-size: 12px; line-height: 1.2; }
+  .path-fragment:hover .path-caption, .path-fragment:focus-visible .path-caption { opacity: 1; background: rgb(255 255 255 / .68); }
+  .path-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; text-align: center; font-size: 17px; color: #777; pointer-events: none; }
+  .path-empty[hidden] { display: none; }
+  .path-transition { display: none; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  @media (max-width: 600px) { .path-viewport { inset: 62px 16px 62px; } }
+  @media (prefers-reduced-motion: reduce) { .path-page, .path-caption { transition: none; } }
+</style>

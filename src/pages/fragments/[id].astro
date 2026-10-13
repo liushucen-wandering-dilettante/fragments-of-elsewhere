@@ -1,35 +1,253 @@
 ---
-export function getStaticPaths() {
-  return [
-    {
-      params: { id: "F001" },
-      props: { id: "F001" }
-    }
-  ];
+import fragments from "../../data/fragments.json";
+import LanguageTransitions from "../../components/LanguageTransitions.astro";
+import ImageFragment from "../../components/fragments/ImageFragment.astro";
+import TextFragment from "../../components/fragments/TextFragment.astro";
+import AudioFragment from "../../components/fragments/AudioFragment.astro";
+import PathTracker from "../../components/PathTracker.astro";
+import VideoFragment from "../../components/fragments/VideoFragment.astro";
+import FragmentAtlasMiniMap from "../../components/FragmentAtlasMiniMap.astro";
+import PageTransitions from "../../components/PageTransitions.astro";
+import FragmentPathPreview from "../../components/FragmentPathPreview.astro";
+import "../../styles/fonts.css";
+
+interface VideoFragmentData {
+  id: string;
+  type: "video";
+  video: string;
+  poster?: string;
+  alt?: string;
+  title?: string;
+  follow?: FollowOption[];
+}
+interface FollowOption {
+  label: string;
+  labelEn?: string;
+  target: string;
 }
 
-const { id } = Astro.props;
+interface ImageFragmentData {
+  id: string;
+  type: "image";
+  image: string;
+  alt?: string;
+  title?: string;
+  follow?: FollowOption[];
+}
+
+interface TextFragmentData {
+  id: string;
+  type: "text";
+  template?: string;
+  contentId?: string;
+  title?: string;
+  follow?: FollowOption[];
+}
+
+interface AudioFragmentData {
+  id: string;
+  type: "audio";
+  audio: string;
+  title?: string;
+  caption?: string;
+  follow?: FollowOption[];
+}
+
+type FragmentData =
+  | ImageFragmentData
+  | TextFragmentData
+  | AudioFragmentData
+  | VideoFragmentData;
+
+export function getStaticPaths() {
+  const typedFragments =
+    fragments as unknown as FragmentData[];
+
+  return typedFragments.map((fragment) => ({
+    params: {
+      id: fragment.id
+    },
+    props: {
+      fragment
+    }
+  }));
+}
+
+interface Props {
+  fragment: FragmentData;
+}
+
+const { fragment } = Astro.props as Props;
+
+const typedFragments =
+  fragments as unknown as FragmentData[];
+
+const allFragmentIds = typedFragments.map(
+  (item) => item.id
+);
 ---
 
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width" />
-    <title>{id} — Fragments of Elsewhere</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    />
+    <PageTransitions />
+    <title>
+      {fragment.title ?? fragment.id} —
+      Fragments of Elsewhere
+    </title>
   </head>
 
-  <body>
-    <main>
-      <a href="/atlas">← Return to atlas</a>
-      <h1>{id}</h1>
+  <body id="foe-fragment-page">
+  <PathTracker fragment={fragment} />
+  <FragmentAtlasMiniMap fragmentId={fragment.id} />
+<FragmentPathPreview currentId={fragment.id} />
+  {
+    fragment.type === "image" ? (
+      <ImageFragment fragment={fragment} />
+    ) : fragment.type === "text" ? (
+      <TextFragment fragment={fragment} />
+    ) : fragment.type === "audio" ? (
+      <AudioFragment
+        fragment={fragment}
+        allFragmentIds={allFragmentIds}
+      />
+    ) : fragment.type === "video" ? (
+      <VideoFragment fragment={fragment} />
+    ) : (
+      <main class="unknown-fragment">
+        Unknown fragment type
+      </main>
+    )
+  }
+    <LanguageTransitions />
+</body>
 
-      <nav>
-        <a href="/constellations/train">Continue through train</a>
-        <a href="/constellations/water-reflection">
-          Continue through water
-        </a>
-      </nav>
-    </main>
-  </body>
 </html>
+
+<script>
+  // Capture legacy return buttons as well as the shared ReturnMenu button.
+  // This prevents older component click handlers from navigating twice.
+  type FragmentReturnWindow = Window & {
+    fragmentReturnInstalled?: boolean;
+    elsewhereNavigate?: (href: string) => void;
+  };
+  const fragmentReturnRuntime = window as FragmentReturnWindow;
+  if (!fragmentReturnRuntime.fragmentReturnInstalled) {
+    fragmentReturnRuntime.fragmentReturnInstalled = true;
+    document.addEventListener("click", (event) => {
+      if (!document.getElementById("foe-fragment-page")) return;
+      const element = event.target instanceof Element ? event.target : null;
+      const button = element?.closest("button[data-return], button[data-return-last-page], button.return-menu-trigger, button.return-button");
+      if (!button) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (window.history.length > 1) window.history.back();
+      else if (typeof fragmentReturnRuntime.elsewhereNavigate === "function") fragmentReturnRuntime.elsewhereNavigate("/");
+      else window.location.assign("/");
+    }, true);
+  }
+</script>
+
+<style is:global>
+  body#foe-fragment-page {
+    /* 页面按钮和导航 */
+    --button-size: 17px;
+
+    /* 中文正文 */
+    --chinese-size: 20px;
+    --chinese-weight: 100;
+    --chinese-line-height: 1.8;
+
+    /* 英文正文：可以与中文设置不同 */
+    --english-size: 20px;
+    --english-weight: 200;
+    --english-line-height: 1.6;
+
+/* 中文标题 */
+--chinese-title-size: 22px;
+--chinese-title-weight: 400;
+
+/* 英文标题 */
+--english-title-size: 20px;
+--english-title-weight: 700;
+
+    --fragment-font:
+      "PT Sans",
+      "HY QiHei X3 Web",
+      "PingFang SC",
+      "Hiragino Sans GB",
+      "Microsoft YaHei",
+      "Noto Sans CJK SC",
+      sans-serif;
+  }
+
+  html,
+  body {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    background: #ffffff;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  /* 页面默认字号：按钮、导航及小窗文字 */
+  body#foe-fragment-page,
+  body#foe-fragment-page * {
+    font-size: var(--button-size) !important;
+    font-family: var(--fragment-font) !important;
+  }
+
+  /* 中文正文 */
+  body#foe-fragment-page .chinese-panel,
+  body#foe-fragment-page .chinese-panel * {
+    font-size: var(--chinese-size) !important;
+    font-weight: var(--chinese-weight);
+    line-height: var(--chinese-line-height);
+  }
+
+  /* 英文正文 */
+  body#foe-fragment-page .english-panel,
+  body#foe-fragment-page .english-panel * {
+    font-size: var(--english-size) !important;
+    font-weight: var(--english-weight);
+    line-height: var(--english-line-height);
+  }
+
+/* 中文标题 */
+body#foe-fragment-page .chinese-panel h1,
+body#foe-fragment-page .chinese-panel h1 * {
+  font-size: var(--chinese-title-size) !important;
+  font-weight: var(--chinese-title-weight);
+  line-height: 1.3;
+}
+
+/* 英文标题 */
+body#foe-fragment-page .english-panel h1,
+body#foe-fragment-page .english-panel h1 * {
+  font-size: var(--english-title-size) !important;
+  font-weight: var(--english-title-weight);
+  line-height: 1.3;
+}
+/* 正文超链接：下划线与文字留一点距离 */
+body#foe-fragment-page .language-panel a {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+  .unknown-fragment {
+    padding: 24px;
+  }
+
+  /* 隐藏旧版 return 下拉选项 */
+  body#foe-fragment-page .return-menu-options {
+    display: none !important;
+  }
+</style>

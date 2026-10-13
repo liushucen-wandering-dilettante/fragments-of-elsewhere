@@ -1,0 +1,743 @@
+---
+import fragments from "../../data/fragments.json";
+import ReturnMenu from "../ReturnMenu.astro";
+
+interface FollowOption {
+  label: string;
+  labelEn?: string;
+  target: string;
+}
+
+interface ImageFragmentData {
+  id: string;
+  type: "image";
+  image: string;
+  alt?: string;
+  date?: string;
+  location?: string;
+  follow?: FollowOption[];
+}
+interface Props {
+  fragment: ImageFragmentData;
+}
+
+const { fragment } = Astro.props as Props;
+
+const followOptions: FollowOption[] = fragment.follow ?? [];
+
+const allFragmentIds: string[] = fragments.map(
+  (item) => String(item.id)
+);
+---
+
+<article class="image-fragment">
+  <!-- 右上角：Follow 下拉菜单 -->
+  <div class="follow-menu">
+
+  <button
+    class="follow-trigger"
+    type="button"
+    aria-label="Show related paths"
+  >
+    <span>follow</span>
+    <span class="follow-arrow" aria-hidden="true">▽</span>
+  </button>
+
+  {
+  followOptions.length > 0 ? (
+    <nav
+      class="follow-options"
+      aria-label="Related fragments"
+    >
+      {
+        followOptions.map((option) => (
+          <a
+            href={`/fragments/${option.target}/`}
+            data-path-label={
+              option.labelEn ?? option.label
+            }
+          >
+            {option.label}
+          </a>
+        ))
+      }
+    </nav>
+  ) : (
+    <p class="follow-empty">
+      no further path
+    </p>
+  )
+}
+</div>
+
+  <!-- 页面中央图片 -->
+
+ <main class="image-stage">
+  <button
+    class="image-open-button"
+    type="button"
+    data-image-open
+    aria-label={`Enlarge fragment ${fragment.id}`}
+  >
+    <img
+      src={fragment.image}
+      alt={fragment.alt ?? `Fragment ${fragment.id}`}
+      loading="eager"
+    />
+  </button>
+</main>
+
+<!-- 图片放大后的全屏界面 -->
+<dialog
+  class="image-lightbox"
+  data-image-lightbox
+  aria-label={`Enlarged fragment ${fragment.id}`}
+>
+  <figure class="image-lightbox-figure">
+    <img
+      class="image-lightbox-image"
+      src={fragment.image}
+      alt={fragment.alt ?? `Fragment ${fragment.id}`}
+    />
+
+    {
+      (fragment.date || fragment.location) && (
+<figcaption class="image-lightbox-caption">
+  {[fragment.location, fragment.date]
+    .filter(Boolean)
+    .join(" | ")}
+</figcaption>
+      )
+    }
+  </figure>
+</dialog>
+  <!-- 左下角：返回上一页 -->
+
+<div class="return-button">
+  <ReturnMenu fragmentId={fragment.id} />
+</div>
+
+<a
+  class="path-link"
+  href="/path/"
+>
+  path
+</a>
+
+<button
+  class="drift-button"
+  type="button"
+  data-drift
+  data-current-id={fragment.id}
+  data-fragment-ids={JSON.stringify(allFragmentIds)}
+>
+  <span>drift</span>
+  <em>elsewhere</em>
+  <span aria-hidden="true">▷</span>
+</button>
+</article>
+
+<script>
+  // Return：如果上一页来自当前网站，则返回上一页；
+  // 否则回到 Atlas 首页。
+
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-return]")
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        const previousUrl = document.referrer;
+
+        if (previousUrl) {
+          const previousOrigin = new URL(previousUrl).origin;
+
+          if (previousOrigin === window.location.origin) {
+            window.history.back();
+            return;
+          }
+        }
+
+        window.location.assign("/");
+      });
+    });
+
+  // Drift elsewhere：随机进入另一个 fragment。
+
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-drift]")
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        const currentId = button.dataset.currentId;
+        const encodedIds = button.dataset.fragmentIds ?? "[]";
+
+        let allIds: string[] = [];
+
+        try {
+          const parsedIds: unknown = JSON.parse(encodedIds);
+
+          if (Array.isArray(parsedIds)) {
+            allIds = parsedIds.filter(
+              (id): id is string => typeof id === "string"
+            );
+          }
+        } catch (error) {
+          console.error("Could not read fragment IDs:", error);
+        }
+
+        const possibleIds = allIds.filter(
+          (id) => id !== currentId
+        );
+
+        if (possibleIds.length === 0) {
+          window.location.assign("/");
+          return;
+        }
+
+        const randomIndex = Math.floor(
+          Math.random() * possibleIds.length
+        );
+
+        const nextId = possibleIds[randomIndex];
+
+        if (!nextId) {
+          window.location.assign("/");
+          return;
+        }
+
+        window.location.assign(
+          `/fragments/${encodeURIComponent(nextId)}/`
+        );
+      });
+    });
+
+  // 点击图片放大
+
+document
+  .querySelectorAll<HTMLElement>(
+    ".image-fragment"
+  )
+  .forEach((page) => {
+    const openButton =
+      page.querySelector<HTMLButtonElement>(
+        "[data-image-open]"
+      );
+
+    const lightbox =
+      page.querySelector<HTMLDialogElement>(
+        "[data-image-lightbox]"
+      );
+
+    if (
+      !(openButton instanceof HTMLButtonElement) ||
+      !(lightbox instanceof HTMLDialogElement)
+    ) {
+      return;
+    }
+
+    const safeLightbox: HTMLDialogElement =
+      lightbox;
+
+    let isClosing = false;
+
+    function openLightbox() {
+      if (safeLightbox.open) return;
+
+      isClosing = false;
+
+      safeLightbox.classList.remove(
+        "is-closing"
+      );
+
+      safeLightbox.showModal();
+    }
+
+    function closeLightbox() {
+      if (!safeLightbox.open || isClosing) {
+        return;
+      }
+
+      isClosing = true;
+
+      safeLightbox.classList.add(
+        "is-closing"
+      );
+
+      window.setTimeout(() => {
+        safeLightbox.close();
+
+        safeLightbox.classList.remove(
+          "is-closing"
+        );
+
+        isClosing = false;
+      }, 500);
+    }
+
+    openButton.addEventListener(
+      "click",
+      openLightbox
+    );
+
+    // 点击图片周围的白色区域退出
+    safeLightbox.addEventListener(
+      "click",
+      (event) => {
+        if (event.target === safeLightbox) {
+          closeLightbox();
+        }
+      }
+    );
+
+    // 按 Escape 也会淡出退出
+    safeLightbox.addEventListener(
+      "cancel",
+      (event) => {
+        event.preventDefault();
+        closeLightbox();
+      }
+    );
+  });
+</script>
+
+<style>
+  :global(html),
+  :global(body) {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    background: #ffffff;
+  }
+
+  :global(*) {
+    box-sizing: border-box;
+  }
+
+  :global(body),
+  button {
+    font-family: Verdana, sans-serif;
+  }
+
+  .image-fragment {
+    position: relative;
+    width: 100vw;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: hidden;
+    background: #ffffff;
+    color: #111;
+    font-family: Verdana, sans-serif;
+    font-size: 12px;
+  }
+
+  /* 左上角项目名称 */
+
+  .project-link {
+    position: absolute;
+    top: 17px;
+    left: 14px;
+    z-index: 10;
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .project-link:hover {
+    opacity: 0.5;
+  }
+
+  .project-arrow {
+    font-size: 9px;
+  }
+
+  /* Follow 菜单 */
+
+ /* Follow 菜单 */
+
+.follow-menu {
+  position: absolute;
+  top: 15px;
+  right: 14px;
+  z-index: 10;
+  min-width: 130px;
+  padding-bottom: 8px;
+  text-align: right;
+}
+
+.follow-trigger {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #111;
+  font-family: Verdana, sans-serif;
+  font-size: 12px;
+  cursor: default;
+}
+
+.follow-arrow {
+  display: inline-block;
+  font-size: 9px;
+  transition: transform 180ms ease;
+}
+
+.follow-options {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  display: flex;
+  min-width: 130px;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 5px;
+
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-3px);
+
+  transition:
+    opacity 180ms ease,
+    visibility 180ms ease,
+    transform 180ms ease;
+}
+
+.follow-menu:hover .follow-options,
+.follow-menu:focus-within .follow-options {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.follow-menu:hover .follow-arrow,
+.follow-menu:focus-within .follow-arrow {
+  transform: rotate(180deg);
+}
+
+.follow-options a {
+  color: #999;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.follow-options a:hover,
+.follow-options a:focus-visible {
+  color: #111;
+}
+
+.follow-empty {
+  margin: 5px 0 0;
+  color: #aaa;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 180ms ease;
+}
+
+.follow-menu:hover .follow-empty,
+.follow-menu:focus-within .follow-empty {
+  opacity: 1;
+  visibility: visible;
+}
+
+  /* 中央图片区域 */
+
+  .image-stage {
+    display: grid;
+    width: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: 68px 110px 58px;
+    place-items: center;
+  }
+
+  .image-stage img {
+    display: block;
+    width: auto;
+    max-width: min(64vw, 1050px);
+    height: auto;
+    max-height: calc(100vh - 135px);
+    max-height: calc(100dvh - 135px);
+    object-fit: contain;
+  }
+
+  /* 左下角 Return */
+
+  .return-button,
+  .drift-button {
+    position: absolute;
+    bottom: 17px;
+    z-index: 10;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #111;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .return-button {
+    left: 14px;
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .path-link {
+  position: fixed;
+  bottom: 17px;
+  left: 50%;
+  z-index: 20;
+  color: #111;
+  font-family: Verdana, sans-serif;
+  font-size: 12px;
+  text-decoration: none;
+  transform: translateX(-50%);
+}
+
+.path-link:hover {
+  opacity: 0.5;
+}
+
+.path-link:focus-visible {
+  outline: 1px solid #111;
+  outline-offset: 4px;
+}
+
+  /* 右下角 Drift */
+
+  .drift-button {
+    right: 14px;
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .drift-button em {
+    color: #999;
+    font-style: italic;
+  }
+
+  .return-button:hover,
+  .drift-button:hover {
+    opacity: 0.5;
+  }
+
+  /* 键盘访问 */
+
+  .project-link:focus-visible,
+  .follow-trigger:focus-visible,
+  .follow-options a:focus-visible,
+  .return-button:focus-visible,
+  .drift-button:focus-visible {
+    outline: 1px solid #111;
+    outline-offset: 4px;
+  }
+
+  /* 原始图片的点击按钮 */
+
+.image-open-button {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.image-open-button img {
+  transition:
+    opacity 300ms ease,
+    transform 500ms ease;
+}
+
+.image-open-button:hover img {
+  opacity: 0.9;
+  transform: scale(1.01);
+}
+
+/* 全屏放大界面 */
+
+.image-lightbox {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 55px;
+  border: 0;
+  outline: 0;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.97);
+  opacity: 0;
+}
+
+.image-lightbox[open] {
+  display: grid;
+  place-items: center;
+  animation: lightbox-appear 600ms ease forwards;
+}
+
+.image-lightbox::backdrop {
+  background: transparent;
+}
+
+/* 放大后的图片 */
+
+.image-lightbox-figure {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.image-lightbox-image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 170px);
+  max-height: calc(100dvh - 170px);
+  object-fit: contain;
+  animation: image-enlarge 700ms ease forwards;
+}
+
+.image-lightbox-caption {
+  width: 100%;
+  color: #777;
+  font-family: Verdana, sans-serif;
+  font-size: 11px;
+  font-weight: normal;
+  line-height: 1.5;
+  text-align: center;
+}
+}
+
+/* 退出动画 */
+
+.image-lightbox.is-closing {
+  animation: lightbox-disappear 500ms ease forwards;
+}
+
+.image-lightbox.is-closing
+  .image-lightbox-image {
+  animation: image-shrink 500ms ease forwards;
+}
+
+@keyframes lightbox-appear {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes lightbox-disappear {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes image-enlarge {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes image-shrink {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+/* 统一界面字体 */
+
+.project-link,
+.follow-trigger,
+.path-link,
+.return-button,
+.drift-button {
+  font-family: Verdana, sans-serif;
+  font-size: 12px;
+}
+
+/* 小屏幕 */
+
+@media (max-width: 700px) {
+  .image-lightbox {
+    padding: 45px 18px;
+  }
+
+.image-lightbox-image {
+  max-width: 100%;
+  max-height: calc(100dvh - 155px);
+}
+
+.image-lightbox-caption {
+  font-size: 10px;
+}
+
+  .image-stage {
+    padding: 75px 20px 60px;
+  }
+
+  .image-stage img {
+    max-width: 92vw;
+    max-height: calc(100dvh - 150px);
+  }
+
+  .project-link {
+    max-width: 55vw;
+  }
+
+  .path-link {
+    bottom: 16px;
+  }
+}
+
+/* 减少动画 */
+
+@media (prefers-reduced-motion: reduce) {
+  .follow-arrow,
+  .follow-options,
+  .image-open-button img {
+    transition: none;
+  }
+
+  .image-lightbox[open],
+  .image-lightbox-image,
+  .image-lightbox.is-closing,
+  .image-lightbox.is-closing
+    .image-lightbox-image {
+    animation: none;
+  }
+
+  .image-lightbox[open] {
+    opacity: 1;
+  }
+}
+</style>

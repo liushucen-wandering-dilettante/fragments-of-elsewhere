@@ -1,0 +1,210 @@
+<script>
+  type ArrowDirection = "left" | "right" | "down" | "up";
+  type DirectionalButtonWindow = Window & { foeSolidButtonsInstalled?: boolean };
+  const runtime = window as DirectionalButtonWindow;
+
+  if (!runtime.foeSolidButtonsInstalled) {
+    runtime.foeSolidButtonsInstalled = true;
+    const triangle = /[◁◀◃▷▶▹▽▼▿△▲▵]/;
+    const enhanceControl = (control: HTMLElement, direction: ArrowDirection) => {
+      control.dataset.foeDirectionButton = direction;
+      if (control.dataset.foeArrowReady === "solid-v2") return;
+      control.dataset.foeArrowReady = "solid-v2";
+      control.dataset.foeAddedArrow = "managed";
+      const solidGlyph = { left: "◀", right: "▶", down: "▼", up: "▲" }[direction];
+      // Upgrade icons already created by the earlier animation component.
+      const existingArrow = control.querySelector<HTMLElement>("span[data-foe-arrow]");
+      if (existingArrow) {
+        existingArrow.dataset.foeArrow = direction;
+        existingArrow.textContent = solidGlyph;
+        const host = existingArrow.parentElement;
+        if (host && host !== control && host.textContent?.trim() === solidGlyph) host.dataset.foeArrowHost = direction;
+      }
+      const walker = document.createTreeWalker(control, NodeFilter.SHOW_TEXT);
+      const texts: Text[] = [];
+      while (walker.nextNode()) texts.push(walker.currentNode as Text);
+      let installed = !!existingArrow;
+      for (const text of existingArrow ? [] : texts) {
+        const match = triangle.exec(text.data);
+        if (!match || text.parentElement?.closest("svg")) continue;
+        const glyph = document.createElement("span");
+        glyph.dataset.foeArrow = direction;
+        glyph.textContent = solidGlyph;
+        glyph.setAttribute("aria-hidden", "true");
+        const parent = text.parentElement;
+        if (parent && parent !== control && parent.textContent?.trim() === match[0]) {
+          // Keep the original outer host, including follow's hover rotation.
+          parent.dataset.foeArrowHost = direction;
+          parent.replaceChildren(glyph);
+        } else {
+          const glyphText = text.splitText(match.index);
+          glyphText.splitText(match[0].length);
+          glyphText.replaceWith(glyph);
+        }
+        installed = true;
+      }
+      if (!installed) {
+        const svg = control.querySelector<SVGSVGElement>('svg[aria-hidden="true"]');
+        if (svg) {
+          svg.dataset.foeArrowHost = direction;
+          svg.setAttribute("viewBox", "0 0 8 8");
+          svg.setAttribute("width", "8");
+          svg.setAttribute("height", "8");
+          const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+          group.dataset.foeSvgArrow = direction;
+          const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+          polygon.setAttribute("fill", "currentColor");
+          polygon.setAttribute("stroke", "none");
+          polygon.setAttribute("points", { left: "8,0 0,4 8,8", right: "0,0 8,4 0,8", down: "0,0 8,0 4,8", up: "0,8 8,8 4,0" }[direction]);
+          group.append(polygon);
+          svg.replaceChildren(group);
+        } else {
+          // Pseudo-elements preserve the path label used by the preview script.
+          control.dataset.foeAddedArrow = direction;
+        }
+      }
+      if (direction === "right" && !control.querySelector("em")) {
+        const labelWalker = document.createTreeWalker(control, NodeFilter.SHOW_TEXT);
+        let node: Node | null;
+        while ((node = labelWalker.nextNode())) {
+          const text = node as Text;
+          const match = /elsewhere/i.exec(text.data);
+          if (!match) continue;
+          const word = text.splitText(match.index);
+          word.splitText(match[0].length);
+          const em = document.createElement("em");
+          word.replaceWith(em);
+          em.append(word);
+          break;
+        }
+      }
+    };
+
+    const scanButtons = () => {
+      document.querySelectorAll<HTMLElement>('a, button, [role="button"], .follow-trigger').forEach((control) => {
+        const label = (control.textContent || "").replace(triangle, "").trim().toLowerCase().replace(/\s+/g, " ");
+        if (control.matches('[data-return], [data-return-last-page], .return-menu-trigger, .return-button') || label === "return") enhanceControl(control, "left");
+        else if (control.matches('[data-drift], [data-constellation-drift], .drift-button') || label === "drift elsewhere") enhanceControl(control, "right");
+        else if (control.matches('[data-path-close], .follow-trigger, [data-follow-trigger]') || label === "follow") enhanceControl(control, "down");
+        else if (control.matches("[data-path-expand]")) enhanceControl(control, "up");
+        else if (label === "path" && document.getElementById("foe-fragment-page") && control.matches('[data-pp-trigger], .path-link, .path-button')) enhanceControl(control, "up");
+      });
+    };
+    let scheduled = false;
+    const scheduleScan = () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => { scheduled = false; scanButtons(); });
+    };
+    scanButtons();
+    new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, characterData: true, subtree: true });
+    document.addEventListener("DOMContentLoaded", scheduleScan, { once: true });
+    document.addEventListener("astro:page-load", scheduleScan);
+    window.addEventListener("pageshow", scheduleScan);
+  }
+</script>
+
+<style is:global>
+  /* Shared controls, including constellation's formerly smaller corner links. */
+  html body [data-foe-direction-button]:not(.pp-original-path),
+  body#foe-fragment-page [data-foe-direction-button]:not(.pp-original-path) {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #111 !important;
+    font-family: "PT Sans", "HY QiHei X3 Web", sans-serif !important;
+    font-size: var(--button-size, 17px) !important;
+    font-weight: 400 !important;
+    line-height: 1.35 !important;
+    text-decoration: none !important;
+    white-space: nowrap;
+    cursor: pointer !important;
+  }
+  html body [data-foe-direction-button] *,
+  body#foe-fragment-page [data-foe-direction-button] * {
+    font-family: inherit !important;
+    font-size: inherit !important;
+    font-weight: inherit !important;
+    line-height: inherit !important;
+  }
+  html body [data-foe-direction-button="right"] em {
+    color: #999 !important;
+    font-style: italic !important;
+  }
+  [data-foe-arrow-host] {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 8px !important;
+    height: 8px !important;
+    flex: 0 0 8px !important;
+    overflow: visible !important;
+    pointer-events: none;
+  }
+  [data-foe-arrow],
+  [data-foe-added-arrow="left"]::before,
+  [data-foe-added-arrow="right"]::after,
+  [data-foe-added-arrow="down"]::after,
+  [data-foe-added-arrow="up"]::after {
+    content: "";
+    display: inline-block !important;
+    width: 8px !important;
+    height: 8px !important;
+    flex: 0 0 8px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    background: currentColor !important;
+    pointer-events: none;
+  }
+  [data-foe-arrow="left"], [data-foe-added-arrow="left"]::before { clip-path: polygon(100% 0, 0 50%, 100% 100%); }
+  [data-foe-arrow="right"], [data-foe-added-arrow="right"]::after { clip-path: polygon(0 0, 100% 50%, 0 100%); }
+  [data-foe-arrow="down"], [data-foe-added-arrow="down"]::after { clip-path: polygon(0 0, 100% 0, 50% 100%); }
+  [data-foe-arrow="up"], [data-foe-added-arrow="up"]::after { clip-path: polygon(0 100%, 100% 100%, 50% 0); }
+  [data-foe-svg-arrow] polygon { fill: currentColor !important; stroke: none !important; }
+  [data-foe-arrow], [data-foe-svg-arrow],
+  [data-foe-added-arrow="left"]::before,
+  [data-foe-added-arrow="right"]::after,
+  [data-foe-added-arrow="down"]::after,
+  [data-foe-added-arrow="up"]::after {
+    --foe-arrow-x: 0px;
+    --foe-arrow-y: 0px;
+    animation: foe-direction-hint 1.6s ease-in-out infinite;
+  }
+  [data-foe-arrow="left"], [data-foe-svg-arrow="left"], [data-foe-added-arrow="left"]::before { --foe-arrow-x: -6px; }
+  [data-foe-arrow="right"], [data-foe-svg-arrow="right"], [data-foe-added-arrow="right"]::after { --foe-arrow-x: 6px; }
+  [data-foe-arrow="down"], [data-foe-svg-arrow="down"], [data-foe-added-arrow="down"]::after { --foe-arrow-y: 6px; }
+  [data-foe-arrow="up"], [data-foe-svg-arrow="up"], [data-foe-added-arrow="up"]::after { --foe-arrow-y: -6px; }
+
+  /* Immediately paint legacy glyphs as solid shapes, even before the script runs. */
+  html body :is(.return-button, .return-menu-trigger, .drift-button, .follow-trigger, [data-return], [data-drift]) > span[aria-hidden="true"]:not([data-foe-arrow-host]),
+  html body#foe-fragment-page :is(.return-button, .return-menu-trigger, .drift-button, .follow-trigger, [data-return], [data-drift]) > span[aria-hidden="true"]:not([data-foe-arrow-host]) {
+    display: inline-block !important;
+    width: 8px !important;
+    height: 8px !important;
+    flex: 0 0 8px !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    background: currentColor !important;
+  }
+  :is(.return-button, .return-menu-trigger, [data-return]) > span[aria-hidden="true"]:not([data-foe-arrow-host]) { clip-path: polygon(100% 0, 0 50%, 100% 100%); }
+  :is(.drift-button, [data-drift]) > span[aria-hidden="true"]:not([data-foe-arrow-host]) { clip-path: polygon(0 0, 100% 50%, 0 100%); }
+  .follow-trigger > span[aria-hidden="true"]:not([data-foe-arrow-host]) { clip-path: polygon(0 0, 100% 0, 50% 100%); }
+  html body [data-foe-arrow],
+  html body#foe-fragment-page [data-foe-arrow] { font-size: 0 !important; line-height: 0 !important; }
+
+  @keyframes foe-direction-hint {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(var(--foe-arrow-x), var(--foe-arrow-y)); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-foe-arrow], [data-foe-svg-arrow],
+    [data-foe-added-arrow="left"]::before,
+    [data-foe-added-arrow="right"]::after,
+    [data-foe-added-arrow="down"]::after,
+    [data-foe-added-arrow="up"]::after { animation: none; transform: none; }
+  }
+</style>

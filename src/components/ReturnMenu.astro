@@ -1,0 +1,49 @@
+---
+interface Props {
+  fragmentId?: string;
+}
+---
+
+<div class="fragment-return-menu">
+  <button class="return-menu-trigger" type="button" data-return-last-page aria-label="Return to the previous page">
+    <span aria-hidden="true">◁</span>
+    <span>return</span>
+  </button>
+</div>
+
+<script>
+  function initialiseReturnButtons() {
+    document.querySelectorAll<HTMLButtonElement>("[data-return-last-page]:not([data-return-ready])")
+      .forEach((button) => {
+        button.dataset.returnReady = "true";
+        button.addEventListener("click", () => {
+          if (window.history.length > 1) {
+            window.history.back();
+          } else {
+            const runtime = window as Window & { elsewhereNavigate?: (href: string) => void };
+            if (typeof runtime.elsewhereNavigate === "function") runtime.elsewhereNavigate("/");
+            else window.location.assign("/");
+          }
+        });
+      });
+  }
+  initialiseReturnButtons();
+  document.addEventListener("astro:page-load", initialiseReturnButtons);
+</script>
+
+<style>
+  .fragment-return-menu { position: relative; display: inline-block; color: inherit; font: inherit; text-align: left; }
+  .return-menu-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .return-menu-trigger:hover { opacity: 0.6; }
+  .return-menu-trigger:focus-visible { outline: 1px solid currentColor; outline-offset: 4px; }
+</style>

@@ -1,0 +1,190 @@
+---
+import ConstellationAtlas from "./ConstellationAtlas.astro";
+import fragmentsSource from "../data/fragments.json";
+import constellationColors from "../data/constellation-colors.json";
+
+interface Props {
+  fragmentId: string;
+  atlasPath?: string;
+}
+
+const { fragmentId, atlasPath = "/" } = Astro.props as Props;
+const currentFragment = (fragmentsSource as Array<{ id: string; constellations?: string[] }>)
+  .find((fragment) => String(fragment.id) === String(fragmentId));
+const groups = [...new Set(currentFragment?.constellations || [])];
+const colors = constellationColors as Record<string, string>;
+---
+
+<aside
+  class="fragment-atlas-mini"
+  data-fragment-atlas-mini
+  data-mini-atlas-path={atlasPath}
+  role="link"
+  tabindex="0"
+  aria-label={`Click outside constellation regions to return to the atlas. Belongs to: ${groups.join(", ") || "no constellation"}.`}
+>
+  <div class="fragment-atlas-mini__map">
+    <ConstellationAtlas mode="mini" focusId={fragmentId} interactiveMini miniAtlasPath={atlasPath} />
+  </div>
+
+  <nav class="fragment-atlas-mini__targets" data-mini-targets aria-label="Hovered constellation destinations"></nav>
+
+  <nav class="fragment-atlas-mini__keyboard" aria-label="Current fragment's constellations">
+    {groups.map((group) => <a href={`/atlas/${encodeURIComponent(group)}/`} data-mini-group={group}
+      data-group-color style={`--group-color: ${colors[group] || "#a6a6a6"}`}>{group}</a>)}
+  </nav>
+</aside>
+
+<script>
+  type MiniTarget = { label: string; href: string; color?: string };
+  type MiniNavigationWindow = Window & { elsewhereNavigate?: (href: string) => void };
+
+  function initialiseFragmentMiniMaps() {
+    document.querySelectorAll<HTMLElement>("[data-fragment-atlas-mini]:not([data-mini-navigation-ready])")
+      .forEach((frame) => {
+        const targets = frame.querySelector<HTMLElement>("[data-mini-targets]");
+        if (!targets) return;
+        frame.dataset.miniNavigationReady = "true";
+        frame.addEventListener("atlas-mini-target-change", (event) => {
+          const detail = (event as CustomEvent<{ targets: MiniTarget[] }>).detail;
+          if (!Array.isArray(detail?.targets)) return;
+          targets.replaceChildren(...detail.targets.filter((target) => target.color).map((target) => {
+            const link = document.createElement("a");
+            link.textContent = target.label;
+            link.href = target.href;
+            if (target.color) {
+              link.dataset.groupColor = "true";
+              link.dataset.miniGroup = target.label;
+              link.style.setProperty("--group-color", target.color);
+            }
+            return link;
+          }));
+        });
+        frame.addEventListener("click", (event) => {
+          if (event.defaultPrevented || event.button !== 0 || event.altKey) return;
+          const link = (event.target as Element | null)?.closest<HTMLAnchorElement>("a[href]");
+          // The canvas handles constellation regions and its own empty space.
+          if (!link && (event.target as Element | null)?.closest("canvas")) return;
+          if (link && (!frame.contains(link) || event.metaKey || event.ctrlKey || event.shiftKey)) return;
+          const href = link?.href || frame.dataset.miniAtlasPath || "/";
+          const runtime = window as MiniNavigationWindow;
+          event.preventDefault();
+          if (event.metaKey || event.ctrlKey || event.shiftKey) {
+            window.open(href, "_blank", "noopener");
+            return;
+          }
+          if (typeof runtime.elsewhereNavigate === "function") runtime.elsewhereNavigate(href);
+          else window.location.assign(href);
+        });
+        frame.addEventListener("keydown", (event) => {
+          if (event.target !== frame || event.key !== "Enter") return;
+          event.preventDefault();
+          const href = frame.dataset.miniAtlasPath || "/";
+          const runtime = window as MiniNavigationWindow;
+          if (typeof runtime.elsewhereNavigate === "function") runtime.elsewhereNavigate(href);
+          else window.location.assign(href);
+        });
+      });
+  }
+
+  initialiseFragmentMiniMaps();
+  document.addEventListener("astro:page-load", initialiseFragmentMiniMaps);
+</script>
+
+<style>
+  .fragment-atlas-mini {
+    position: fixed;
+    top: 20px;
+    left: 24px;
+    z-index: 20;
+    width: clamp(168px, 15vw, 220px);
+    aspect-ratio: 1.55;
+    overflow: hidden;
+    border: 1px solid rgba(20, 20, 20, 0.18);
+    background: #fff;
+    box-shadow: 0 5px 18px rgba(30, 25, 20, 0.07);
+    cursor: pointer;
+  }
+
+  .fragment-atlas-mini__map { position: absolute; inset: 0; }
+
+  .fragment-atlas-mini__targets,
+  .fragment-atlas-mini__keyboard {
+    position: absolute;
+    bottom: 4px;
+    left: 4px;
+    right: 4px;
+    z-index: 2;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 2px 5px;
+    max-height: calc(100% - 8px);
+    overflow: auto;
+    padding: 2px 4px;
+    background: transparent;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  /* New hover links are created at runtime, so they need a global selector. */
+  .fragment-atlas-mini :global(nav a) {
+    display: block;
+    pointer-events: auto;
+    padding: 1px 3px;
+    border-radius: 2px;
+    background: transparent;
+    color: #777;
+    text-decoration: none;
+    font: inherit;
+    font-size: 14px;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .fragment-atlas-mini :global(nav a:hover),
+  .fragment-atlas-mini :global(nav a:focus-visible) { color: #171717; }
+  .fragment-atlas-mini :global(a[data-group-color]::before) {
+    content: "";
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 6px;
+    border-radius: 50%;
+    vertical-align: middle;
+    background: var(--group-color);
+  }
+  .fragment-atlas-mini:hover .fragment-atlas-mini__targets {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: none;
+  }
+
+  /* Keep every membership reachable by keyboard, including overlapping hulls. */
+  .fragment-atlas-mini__keyboard {
+    clip-path: inset(50%);
+    opacity: 1;
+    visibility: visible;
+    pointer-events: none;
+  }
+  .fragment-atlas-mini__keyboard:focus-within {
+    clip-path: none;
+    pointer-events: none;
+  }
+  .fragment-atlas-mini:has(.fragment-atlas-mini__keyboard:focus-within) .fragment-atlas-mini__targets {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .fragment-atlas-mini:hover,
+  .fragment-atlas-mini:focus-within { border-color: rgba(20, 20, 20, 0.52); }
+  .fragment-atlas-mini:focus-visible { outline: 1px solid #777; outline-offset: 2px; }
+  .fragment-atlas-mini :global(a:focus-visible) { outline: 1px solid currentColor; outline-offset: 1px; }
+
+  @media (max-width: 700px) {
+    .fragment-atlas-mini { top: 14px; left: 14px; width: 145px; }
+  }
+</style>

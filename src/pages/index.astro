@@ -1,100 +1,58 @@
 ---
-const title = "fragments of elsewhere";
+import ConstellationAtlas from "../components/ConstellationAtlas.astro";
+import PageTransitions from "../components/PageTransitions.astro";
+import "../styles/fonts.css";
 ---
 
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width" />
-    <title>{title}</title>
+
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    />
+
+    <title>fragments of elsewhere</title>
+
+    <PageTransitions />
   </head>
 
   <body>
-    <main>
-      <p class="label">A MEDIA SYSTEM OF DISPLACED MEMORY</p>
+    <ConstellationAtlas />
 
-      <h1>fragments<br />of elsewhere</h1>
-
-      <p class="introduction">
-        An atlas of images, sounds, recordings and texts,
-        connected through memory and displacement.
-      </p>
-
-      <nav>
-        <a href="/atlas">Enter the atlas →</a>
-        <a href="/fragments/F001">Begin with F001 →</a>
-      </nav>
-    </main>
+    <div class="corner-ui">
+      <!-- 原有首页导航放在这里 -->
+    </div>
   </body>
 </html>
 
-<style>
-  :global(*) {
+<style is:global>
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  * {
     box-sizing: border-box;
   }
 
-  :global(body) {
-    margin: 0;
-    background: #ece9df;
-    color: #1d1d1b;
-    font-family: Arial, sans-serif;
+  .corner-ui {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    pointer-events: none;
   }
 
-  main {
-    min-height: 100vh;
-    padding: 48px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-  }
-
-  .label {
-    margin: 0;
-    font-size: 11px;
-    letter-spacing: 0.16em;
-  }
-
-  h1 {
-    margin: auto 0 32px;
-    font-family: Georgia, serif;
-    font-size: clamp(64px, 12vw, 180px);
-    font-weight: normal;
-    line-height: 0.82;
-    letter-spacing: -0.06em;
-  }
-
-  .introduction {
-    max-width: 480px;
-    font-size: 17px;
-    line-height: 1.5;
-  }
-
-  nav {
-    display: flex;
-    gap: 28px;
-    margin-top: 40px;
-  }
-
-  a {
-    color: inherit;
-    text-decoration: none;
-    border-bottom: 1px solid;
-    padding-bottom: 4px;
-  }
-
-  a:hover {
-    opacity: 0.5;
-  }
-
-  @media (max-width: 600px) {
-    main {
-      padding: 24px;
-    }
-
-    nav {
-      flex-direction: column;
-      gap: 16px;
-    }
+  .corner-ui a,
+  .corner-ui button,
+  .corner-ui input,
+  .corner-ui [role="button"] {
+    pointer-events: auto;
   }
 </style>
